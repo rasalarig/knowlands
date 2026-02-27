@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KnowLands - POC LMS RPG</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="hud">
+      <h1>KnowLands • POC</h1>
+      <div class="stats">
+        <span>Nível: <strong id="level">1</strong></span>
+        <span>XP: <strong id="xp">0</strong></span>
+        <span>Moedas: <strong id="coins">0</strong></span>
+        <span>Blocos: <strong id="blocks">0</strong></span>
+      </div>
+      <div class="progress-wrap">
+        <label>Progresso geral</label>
+        <div class="progress"><div id="globalProgressBar"></div></div>
+        <small id="globalProgressText">0%</small>
+      </div>
+    </header>
+
+    <main class="world-layout">
+      <section class="map-panel card">
+        <h2>Mundo RPG • Mar e Continentes</h2>
+        <p>Use WASD/Setas para mover. Pressione E perto da ilha para desafio/fase ou perto de vaquinhas/ovelhas para flashcards.</p>
+        <button id="fullscreenMapBtn" class="ghost">Tela cheia do mapa</button>
+        <div class="world-wrap">
+          <canvas id="worldCanvas" width="1280" height="720"></canvas>
+          <div id="worldHint" class="world-hint">Explore o mapa para encontrar as ilhas de conteúdo.</div>
+          <div id="flashcardBox" class="flashcard hidden"></div>
+        </div>
+
+        <div class="chart-box">
+          <h3>Histórico de acerto</h3>
+          <canvas id="progressChart" width="520" height="120"></canvas>
+        </div>
+      </section>
+
+      <aside class="side-panel">
+        <section class="card">
+          <h2>Acompanhante</h2>
+          <div class="grid-2">
+            <label>
+              Estilo
+              <select id="petStyle">
+                <option value="abelha">Abelha</option>
+                <option value="drone">Drone</option>
+                <option value="vaga-lume">Vaga-lume</option>
+              </select>
+            </label>
+            <label>
+              Humor
+              <select id="petMood">
+                <option value="gentil">Gentil</option>
+                <option value="agressivo">Agressivo</option>
+                <option value="zen">Zen</option>
+              </select>
+            </label>
+          </div>
+          <label>Objetivos pessoais (um por linha)</label>
+          <textarea id="goalsInput" rows="4" placeholder="Comprar um carro&#10;Viajar para Tailândia"></textarea>
+          <button id="saveCompanionBtn">Salvar perfil do acompanhante</button>
+          <div id="companionSpeech" class="speech"></div>
+        </section>
+
+        <section class="card">
+          <h2>Cronograma (edital)</h2>
+          <label>Matérias (uma por linha)</label>
+          <textarea id="subjectsInput" rows="4" placeholder="Constitucional&#10;Trabalho&#10;Português"></textarea>
+          <label>Data da prova</label>
+          <input id="examDate" type="date" />
+          <button id="buildScheduleBtn">Gerar agenda diária</button>
+          <ul id="scheduleList" class="list"></ul>
+        </section>
+      </aside>
+    </main>
+
+    <section class="layout lower">
+      <section class="card quiz-panel">
+        <div class="quiz-header">
+          <h2 id="phaseTitle">Fase</h2>
+          <div class="controls">
+            <label>
+              Repetir fase
+              <select id="repeatMode">
+                <option value="same">Mesmas questões</option>
+                <option value="different">Questões diferentes</option>
+              </select>
+            </label>
+            <label>
+              Filtro
+              <select id="questionFilter">
+                <option value="all">Todas</option>
+                <option value="tf">Certo/Errado</option>
+                <option value="mcq">Objetivas</option>
+              </select>
+            </label>
+            <label>
+              Resposta guia
+              <select id="responseSize">
+                <option value="curto">Curto</option>
+                <option value="medio">Médio</option>
+                <option value="completo">Completo</option>
+                <option value="complexo">Complexo</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <article id="contentBox" class="content-box"></article>
+
+        <article id="islandChallengeBox" class="content-box hidden">
+          <h3 id="challengeTitle">Desafio da Ilha</h3>
+          <p id="challengeText"></p>
+          <div id="challengeOptions" class="options"></div>
+          <div class="actions">
+            <button id="checkChallengeBtn">Responder desafio</button>
+          </div>
+          <p id="challengeFeedback"></p>
+        </article>
+
+        <button id="saveContentReviewBtn" class="ghost">Revisar conteúdo depois</button>
+
+        <article id="questionCard" class="question-card hidden">
+          <p id="questionText"></p>
+          <div id="optionsBox" class="options"></div>
+          <textarea id="essayAnswer" class="hidden" rows="4" placeholder="Digite sua resposta dissertativa"></textarea>
+          <div class="actions">
+            <button id="checkAnswerBtn">Responder</button>
+            <button id="saveQuestionReviewBtn" class="ghost">Revisar questão depois</button>
+            <button id="nextQuestionBtn" class="ghost">Próxima</button>
+          </div>
+          <p id="feedback"></p>
+        </article>
+      </section>
+
+      <section class="card mini-panels">
+        <h2>Revisão</h2>
+        <p>Itens para revisar em ciclos de 1, 3 e 7 dias.</p>
+        <button id="runReviewBtn">Abrir revisão agora</button>
+        <ul id="reviewList" class="list"></ul>
+
+        <h2>Corrida de Simulado (3 competidores)</h2>
+        <button id="startRaceBtn">Iniciar corrida</button>
+        <div id="raceTrack"></div>
+        <small id="raceStatus">Aguardando corrida...</small>
+
+        <h2>Bloco de Notas + Memorex</h2>
+        <textarea id="noteText" rows="3" placeholder="Ex: Almonacid Arellano vs Chile (1973) - controle de convencionalidade"></textarea>
+        <div class="grid-2">
+          <label>Prioridade (1-5)<input id="notePriority" type="number" min="1" max="5" value="3"/></label>
+          <label>Razão prioridade/antigas
+            <select id="noteRatio">
+              <option value="1">1 prioritária / 1 antiga</option>
+              <option value="2">2 prioritárias / 1 antiga</option>
+              <option value="3">3 prioritárias / 1 antiga</option>
+            </select>
+          </label>
+        </div>
+        <button id="saveNoteBtn">Salvar nota</button>
+        <button id="petRecallBtn" class="ghost">Interagir com pet (memorex)</button>
+        <div id="recallOutput" class="speech"></div>
+
+        <h2>Palácio da Memória</h2>
+        <p>Cada acerto gera 1 bloco de construção.</p>
+        <div id="memoryPalace" class="palace"></div>
+      </section>
+    </section>
+
+    <footer class="card chat-area">
+      <h2>NPCs e conversa contextual</h2>
+      <div class="chat-controls">
+        <select id="npcSelect"></select>
+        <input id="npcInput" type="text" placeholder="Fale com o personagem..." />
+        <button id="sendNpcBtn">Enviar</button>
+      </div>
+      <div id="chatLog" class="chat-log"></div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
