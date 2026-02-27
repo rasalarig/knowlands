@@ -44,6 +44,7 @@ const state = {
       flowerBeds: []
     },
     pens: [],
+    lockedPassages: [],
     animals: [],
     activeInteraction: null,
     lockedAnimalId: null,
@@ -54,7 +55,13 @@ const state = {
     {
       id: "ilha-direito",
       name: "Ilha do Direito",
+      locked: false,
       gate: { x: 250, y: 450 },
+      unlockTest: {
+        prompt: "Avaliação de acesso: qual caso é base do controle de convencionalidade?",
+        options: ["Almonacid Arellano vs Chile", "Marbury vs Madison", "ADPF 54", "Caso Dreyfus"],
+        answer: "Almonacid Arellano vs Chile"
+      },
       challenge: {
         prompt: "Qual caso é referência clássica de controle de convencionalidade?",
         options: ["Almonacid Arellano vs Chile", "Marbury vs Madison", "HC 84.078", "Caso Dreyfus"],
@@ -89,7 +96,13 @@ const state = {
     {
       id: "ilha-logica",
       name: "Ilha da Lógica",
+      locked: true,
       gate: { x: 510, y: 318 },
+      unlockTest: {
+        prompt: "Avaliação de desbloqueio: se A->B e A é verdadeiro, então?",
+        options: ["B é verdadeiro", "B é falso", "A é falso", "nada se conclui"],
+        answer: "B é verdadeiro"
+      },
       challenge: {
         prompt: "No modus ponens, se A->B e A é verdadeiro, então:",
         options: ["B é falso", "B é verdadeiro", "A é falso", "não conclui nada"],
@@ -122,7 +135,13 @@ const state = {
     {
       id: "ilha-portugues",
       name: "Ilha de Português",
+      locked: true,
       gate: { x: 865, y: 500 },
+      unlockTest: {
+        prompt: "Avaliação de desbloqueio: redação oficial prioriza?",
+        options: ["Clareza", "Metáfora", "Gíria", "Ambiguidade"],
+        answer: "Clareza"
+      },
       challenge: {
         prompt: "Em redação oficial, o atributo prioritário é:",
         options: ["Metáfora", "Gíria", "Clareza", "Ambiguidade"],
@@ -154,6 +173,7 @@ const state = {
   currentQuestion: null,
   selectedOption: null,
   currentChallenge: null,
+  challengeContext: null,
   selectedChallengeOption: null,
   solvedChallenges: {},
   reviewQueue: [],
@@ -177,13 +197,28 @@ const state = {
     Mentor: [],
     Guardião: [],
     Bibliotecária: []
+  },
+  dialogue: {
+    text: "",
+    visible: false,
+    sticky: false,
+    expiresAt: 0
+  },
+  music: {
+    enabled: false,
+    initialized: false,
+    context: null,
+    masterGain: null,
+    intervals: []
   }
 };
 
 const el = {
   worldCanvas: document.getElementById("worldCanvas"),
   worldHint: document.getElementById("worldHint"),
+  dialogueBubble: document.getElementById("dialogueBubble"),
   flashcardBox: document.getElementById("flashcardBox"),
+  musicToggleBtn: document.getElementById("musicToggleBtn"),
   fullscreenMapBtn: document.getElementById("fullscreenMapBtn"),
   phaseTitle: document.getElementById("phaseTitle"),
   contentBox: document.getElementById("contentBox"),
@@ -263,6 +298,7 @@ function bindEvents() {
   el.sendNpcBtn.addEventListener("click", sendNpcMessage);
   el.fullscreenMapBtn.addEventListener("click", toggleMapFullscreen);
   el.checkChallengeBtn.addEventListener("click", checkIslandChallenge);
+  el.musicToggleBtn.addEventListener("click", toggleBackgroundMusic);
   el.questionFilter.addEventListener("change", () => {
     if (state.currentIsland) loadIsland(state.currentIsland.id);
   });
@@ -277,6 +313,7 @@ function initWorld() {
   snapObstaclesToLand();
   placeIslandGatesOnLand();
   buildWorldScenery();
+  rebuildLockedPassages();
   ensurePlayerOnClearTile();
   el.worldCanvas.width = state.world.viewWidth;
   el.worldCanvas.height = state.world.viewHeight;
@@ -295,6 +332,7 @@ function onWorldWheel(event) {
 }
 
 function onKeyDown(event) {
+  ensureMusicInitialized();
   const key = event.key.toLowerCase();
   if (["arrowup", "arrowdown", "arrowleft", "arrowright", "w", "a", "s", "d"].includes(key)) {
     event.preventDefault();
@@ -309,6 +347,7 @@ function onKeyDown(event) {
   if (key === "escape") {
     event.preventDefault();
     closeAnimalFlashcard();
+    hideDialogue();
   }
 }
 
@@ -324,6 +363,7 @@ function worldTick(ts) {
   updateAnimals(dt);
   updateInteractionHint();
   updateCamera();
+  updateDialogueState();
   drawWorld();
   state.world.rafId = requestAnimationFrame(worldTick);
 }
@@ -427,6 +467,56 @@ function isWalkable(x, y, checkScenery = true) {
     }
   }
 
+  for (const pen of state.world.pens) {
+    if (isBlockedByPenFence(x, y, radius, pen)) return false;
+  }
+
+  for (const gate of state.world.lockedPassages) {
+    if (
+      x + radius > gate.x &&
+      x - radius < gate.x + gate.w &&
+      y + radius > gate.y &&
+      y - radius < gate.y + gate.h
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function isBlockedByPenFence(x, y, radius, pen) {
+  const border = 2;
+  const outerLeft = pen.x - border;
+  const outerTop = pen.y - border;
+  const outerRight = pen.x + pen.w + border;
+  const outerBottom = pen.y + pen.h + border;
+
+  const insideOuter =
+    x + radius >= outerLeft &&
+    x - radius <= outerRight &&
+    y + radius >= outerTop &&
+    y - radius <= outerBottom;
+
+  if (!insideOuter) return false;
+
+  const innerLeft = pen.x + border;
+  const innerTop = pen.y + border;
+  const innerRight = pen.x + pen.w - border;
+  const innerBottom = pen.y + pen.h - border;
+  const insideInner =
+    x + radius <= innerRight &&
+    x - radius >= innerLeft &&
+    y + radius <= innerBottom &&
+    y - radius >= innerTop;
+
+  if (insideInner) return false;
+
+  const gatePadding = 3;
+  const nearGateY = Math.abs(y - pen.gate.y) <= 4 + radius;
+  const withinGateX = x >= pen.gate.x1 - gatePadding && x <= pen.gate.x2 + gatePadding;
+  if (nearGateY && withinGateX) return false;
+
   return true;
 }
 
@@ -515,7 +605,11 @@ function updateInteractionHint() {
 
   if (nearestGate && nearestGateDist <= 42) {
     state.world.activeInteraction = { type: "island", id: nearestGate.id };
-    el.worldHint.textContent = `Você está em ${nearestGate.name}. Pressione E para iniciar a fase.`;
+    if (nearestGate.locked) {
+      el.worldHint.textContent = `${nearestGate.name} está trancada 🔒. Pressione E para fazer avaliação de desbloqueio.`;
+    } else {
+      el.worldHint.textContent = `Você está em ${nearestGate.name}. Pressione E para iniciar a fase.`;
+    }
   } else {
     state.world.activeInteraction = null;
     el.worldHint.textContent = "Explore o mapa para encontrar as ilhas de conteúdo.";
@@ -523,9 +617,20 @@ function updateInteractionHint() {
 }
 
 function interactWithGate() {
-  if (!state.world.activeInteraction) return;
+  if (!state.world.activeInteraction) {
+    showDialogue("Nada para interagir aqui.", { durationMs: 1300 });
+    return;
+  }
   if (state.world.activeInteraction.type === "island") {
     closeAnimalFlashcard();
+    const island = state.islands.find((item) => item.id === state.world.activeInteraction.id);
+    if (!island) return;
+    if (island.locked) {
+      showDialogue(`${island.name} está trancada. Faça a avaliação para liberar.`, { durationMs: 1800 });
+      openUnlockEvaluation(island);
+      return;
+    }
+    showDialogue(`Entrando em ${island.name}...`, { durationMs: 1400 });
     loadIsland(state.world.activeInteraction.id);
     return;
   }
@@ -533,6 +638,7 @@ function interactWithGate() {
     const animal = state.world.animals.find((item) => item.id === state.world.activeInteraction.id);
     if (animal) {
       state.world.lockedAnimalId = animal.id;
+      showDialogue(`${animal.name}: tenho um flashcard para você!`, { sticky: true });
       showAnimalFlashcard(animal);
     }
   }
@@ -583,11 +689,14 @@ function drawWorld() {
   }
 
   drawScenery(ctx);
+  drawLockedPassages(ctx);
   drawAnimals(ctx);
 
-  state.world.obstacles.forEach((obstacle, index) => {
+  let houseCounter = 0;
+  state.world.obstacles.forEach((obstacle) => {
     if (obstacle.kind === "house") {
-      drawHouse3D(obstacle, index + 1);
+      houseCounter += 1;
+      drawHouse3D(obstacle, houseCounter);
     } else {
       ctx.fillStyle = "#64748b";
       ctx.beginPath();
@@ -611,6 +720,16 @@ function drawWorld() {
     ctx.arc(island.gate.x, island.gate.y, 10, 0, Math.PI * 2);
     ctx.fill();
 
+    if (island.locked) {
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(island.gate.x - 4, island.gate.y - 5, 8, 8);
+      ctx.strokeStyle = "#f8fafc";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(island.gate.x, island.gate.y - 5, 3.2, Math.PI, 0);
+      ctx.stroke();
+    }
+
     const text = island.name;
     ctx.font = "bold 12px Segoe UI";
     const tw = ctx.measureText(text).width;
@@ -622,11 +741,129 @@ function drawWorld() {
     ctx.strokeRect(lx + 0.5, ly - 11.5, tw + 11, 15);
     ctx.fillStyle = "#f8fafc";
     ctx.fillText(text, island.gate.x - tw / 2, ly);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(island.gate.x - 10, island.gate.y + 12);
+    ctx.lineTo(island.gate.x - 10, island.gate.y + 24);
+    ctx.moveTo(island.gate.x + 10, island.gate.y + 12);
+    ctx.lineTo(island.gate.x + 10, island.gate.y + 24);
+    ctx.moveTo(island.gate.x - 10, island.gate.y + 24);
+    ctx.lineTo(island.gate.x + 10, island.gate.y + 24);
+    ctx.stroke();
   }
 
   drawHeroSprite(ctx);
 
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  updateDialoguePosition();
+  updateFlashcardPosition();
+}
+
+function worldToScreen(x, y) {
+  const rect = el.worldCanvas.getBoundingClientRect();
+  const scaleX = rect.width / el.worldCanvas.width;
+  const scaleY = rect.height / el.worldCanvas.height;
+  return {
+    rect,
+    sx: (x - state.world.camera.x) * state.world.camera.zoom * scaleX,
+    sy: (y - state.world.camera.y) * state.world.camera.zoom * scaleY
+  };
+}
+
+function drawLockedPassages(ctx) {
+  for (const gate of state.world.lockedPassages) {
+    ctx.fillStyle = "rgba(51,65,85,0.92)";
+    ctx.fillRect(gate.x, gate.y, gate.w, gate.h);
+
+    ctx.strokeStyle = "#f8fafc";
+    ctx.lineWidth = 1;
+    for (let x = gate.x + 3; x < gate.x + gate.w - 2; x += 7) {
+      ctx.beginPath();
+      ctx.moveTo(x, gate.y + 1);
+      ctx.lineTo(x, gate.y + gate.h - 1);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillRect(gate.x + gate.w / 2 - 4, gate.y - 8, 8, 6);
+    ctx.strokeStyle = "#0f172a";
+    ctx.beginPath();
+    ctx.arc(gate.x + gate.w / 2, gate.y - 8, 3.1, Math.PI, 0);
+    ctx.stroke();
+  }
+}
+
+function rebuildLockedPassages() {
+  state.world.lockedPassages = state.islands
+    .filter((island) => island.locked)
+    .map((island) => ({
+      id: island.id,
+      x: island.gate.x - 26,
+      y: island.gate.y + 18,
+      w: 52,
+      h: 12
+    }));
+}
+
+function showDialogue(text, options = {}) {
+  state.dialogue.text = text;
+  state.dialogue.visible = true;
+  state.dialogue.sticky = Boolean(options.sticky);
+  state.dialogue.expiresAt = Date.now() + (options.durationMs || 1600);
+  el.dialogueBubble.textContent = text;
+  el.dialogueBubble.classList.remove("hidden");
+}
+
+function hideDialogue() {
+  state.dialogue.visible = false;
+  state.dialogue.sticky = false;
+  el.dialogueBubble.classList.add("hidden");
+}
+
+function updateDialogueState() {
+  if (!state.dialogue.visible) return;
+  if (!state.dialogue.sticky && Date.now() > state.dialogue.expiresAt) {
+    hideDialogue();
+  }
+}
+
+function updateDialoguePosition() {
+  if (!state.dialogue.visible) return;
+  const { rect, sx: screenX, sy: screenY } = worldToScreen(state.world.playerPos.x, state.world.playerPos.y);
+
+  const bubble = el.dialogueBubble;
+  const bw = bubble.offsetWidth || 180;
+  const bh = bubble.offsetHeight || 40;
+  const left = clamp(screenX - bw / 2, 6, rect.width - bw - 6);
+  const top = clamp(screenY - bh - 38, 6, rect.height - bh - 6);
+  bubble.style.left = `${left}px`;
+  bubble.style.top = `${top}px`;
+}
+
+function updateFlashcardPosition() {
+  if (el.flashcardBox.classList.contains("hidden")) return;
+
+  let anchorX = state.world.playerPos.x;
+  let anchorY = state.world.playerPos.y;
+  const animalId = el.flashcardBox.getAttribute("data-animal-id");
+  if (animalId) {
+    const animal = state.world.animals.find((item) => item.id === animalId);
+    if (animal) {
+      anchorX = animal.x;
+      anchorY = animal.y;
+    }
+  }
+
+  const { rect, sx, sy } = worldToScreen(anchorX, anchorY);
+  const card = el.flashcardBox;
+  const cw = card.offsetWidth || 260;
+  const ch = card.offsetHeight || 140;
+  const left = clamp(sx - cw / 2, 8, rect.width - cw - 8);
+  const top = clamp(sy - ch - 44, 8, rect.height - ch - 8);
+  card.style.left = `${left}px`;
+  card.style.top = `${top}px`;
 }
 
 function drawHeroSprite(ctx) {
@@ -864,28 +1101,30 @@ function drawWindow(x, y, w, h, trimColor = "#fef3c7") {
 }
 
 function drawFenceAroundHouse(ctx, x, y, w, h, houseNumber) {
-  const pad = 9;
-  const fx = x - pad;
-  const fy = y - pad;
-  const fw = w + pad * 2;
-  const fh = h + pad * 2;
-  const gateW = 16;
-  const gateCenter = fx + fw / 2;
+  const pen = state.world.pens[houseNumber - 1];
+  const fx = pen ? pen.x : x - 22;
+  const fy = pen ? pen.y : y - 22;
+  const fw = pen ? pen.w : w + 44;
+  const fh = pen ? pen.h : h + 44;
+  const gateX1 = pen ? pen.gate.x1 : fx + fw / 2 - 17;
+  const gateX2 = pen ? pen.gate.x2 : fx + fw / 2 + 17;
+  const gateCenter = (gateX1 + gateX2) / 2;
+  const gateW = gateX2 - gateX1;
 
-  const postColor = "#8b5e34";
-  const railColor = "#c69a6b";
-  const shadowColor = "rgba(15,23,42,0.18)";
+  const postColor = "#ffffff";
+  const railColor = "rgba(255,255,255,0.96)";
+  const shadowColor = "rgba(15,23,42,0.14)";
 
   ctx.fillStyle = shadowColor;
   ctx.fillRect(fx + 2, fy + fh + 1, fw, 3);
 
-  drawFenceSide(ctx, fx, fy, fw, "top", gateCenter, gateW, postColor, railColor);
-  drawFenceSide(ctx, fx, fy + fh, fw, "bottom", gateCenter, gateW, postColor, railColor);
+  drawFenceSide(ctx, fx, fy, fw, "top", gateCenter, gateW, postColor, railColor, false);
+  drawFenceSide(ctx, fx, fy + fh, fw, "bottom", gateCenter, gateW, postColor, railColor, true);
   drawFenceVertical(ctx, fx, fy, fh, postColor, railColor);
   drawFenceVertical(ctx, fx + fw, fy, fh, postColor, railColor);
 
   const gateX = gateCenter - gateW / 2;
-  ctx.strokeStyle = "#d8b489";
+  ctx.strokeStyle = "rgba(255,255,255,0.85)";
   ctx.lineWidth = 1;
   ctx.strokeRect(gateX + 0.5, fy + fh - 10.5, gateW - 1, 8);
   ctx.beginPath();
@@ -893,7 +1132,7 @@ function drawFenceAroundHouse(ctx, x, y, w, h, houseNumber) {
   ctx.lineTo(gateX + gateW - 2, fy + fh - 3);
   ctx.stroke();
 
-  const label = `Casa ${houseNumber}`;
+  const label = getHouseStudyName(houseNumber);
   ctx.font = "10px Segoe UI";
   const tw = ctx.measureText(label).width;
   ctx.fillStyle = "rgba(15,23,42,0.62)";
@@ -902,37 +1141,62 @@ function drawFenceAroundHouse(ctx, x, y, w, h, houseNumber) {
   ctx.fillText(label, fx + fw / 2 - tw / 2, fy - 5);
 }
 
-function drawFenceSide(ctx, x, y, width, side, gateCenter, gateW, postColor, railColor) {
-  const postStep = 8;
+function getHouseStudyName(houseNumber) {
+  const pen = state.world.pens[houseNumber - 1];
+  if (!pen) return `Casa ${houseNumber}`;
+
+  const namesByIsland = {
+    "ilha-direito": "Casa da Jurisprudência",
+    "ilha-logica": "Casa do Raciocínio",
+    "ilha-portugues": "Casa da Redação"
+  };
+
+  return namesByIsland[pen.islandId] || `Casa de Estudos ${houseNumber}`;
+}
+
+function drawFenceSide(ctx, x, y, width, side, gateCenter, gateW, postColor, railColor, hasGate = false) {
+  const postStep = 7;
   const postH = 6;
   const dir = side === "top" ? 1 : -1;
 
   ctx.strokeStyle = railColor;
   ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(x, y + dir * 1.5);
-  ctx.lineTo(gateCenter - gateW / 2, y + dir * 1.5);
-  ctx.moveTo(gateCenter + gateW / 2, y + dir * 1.5);
-  ctx.lineTo(x + width, y + dir * 1.5);
-  ctx.stroke();
+  const gapLeft = gateCenter - gateW / 2;
+  const gapRight = gateCenter + gateW / 2;
 
-  ctx.beginPath();
-  ctx.moveTo(x, y + dir * 4);
-  ctx.lineTo(gateCenter - gateW / 2, y + dir * 4);
-  ctx.moveTo(gateCenter + gateW / 2, y + dir * 4);
-  ctx.lineTo(x + width, y + dir * 4);
-  ctx.stroke();
+  if (hasGate) {
+    ctx.beginPath();
+    ctx.moveTo(x, y + dir * 1.5);
+    ctx.lineTo(gapLeft, y + dir * 1.5);
+    ctx.moveTo(gapRight, y + dir * 1.5);
+    ctx.lineTo(x + width, y + dir * 1.5);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(x, y + dir * 4);
+    ctx.lineTo(gapLeft, y + dir * 4);
+    ctx.moveTo(gapRight, y + dir * 4);
+    ctx.lineTo(x + width, y + dir * 4);
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(x, y + dir * 1.5);
+    ctx.lineTo(x + width, y + dir * 1.5);
+    ctx.moveTo(x, y + dir * 4);
+    ctx.lineTo(x + width, y + dir * 4);
+    ctx.stroke();
+  }
 
   ctx.fillStyle = postColor;
   for (let px = x; px <= x + width; px += postStep) {
-    if (Math.abs(px - gateCenter) < gateW / 2) continue;
+    if (hasGate && Math.abs(px - gateCenter) < gateW / 2) continue;
     const py = side === "top" ? y : y - postH;
     ctx.fillRect(px - 1, py, 2, postH);
   }
 }
 
 function drawFenceVertical(ctx, x, y, height, postColor, railColor) {
-  const postStep = 8;
+  const postStep = 7;
   const postH = 2;
 
   ctx.strokeStyle = railColor;
@@ -1151,9 +1415,32 @@ function smoothTiles(tiles, cols, rows) {
 }
 
 function snapObstaclesToLand() {
+  const houseAnchors = [
+    { x: state.world.width * 0.18, y: state.world.height * 0.28 },
+    { x: state.world.width * 0.36, y: state.world.height * 0.66 },
+    { x: state.world.width * 0.58, y: state.world.height * 0.32 },
+    { x: state.world.width * 0.82, y: state.world.height * 0.64 }
+  ];
+
+  let houseIndex = 0;
   state.world.obstacles = state.world.obstacles.map((obstacle) => {
     const centerX = obstacle.x + obstacle.w / 2;
     const centerY = obstacle.y + obstacle.h / 2;
+
+    if (obstacle.kind === "house") {
+      const anchor = houseAnchors[houseIndex % houseAnchors.length];
+      houseIndex += 1;
+      const penPad = 30;
+      const clearance = Math.max(obstacle.w, obstacle.h) * 0.7 + penPad;
+      const nearest = findNearestLandWithClearance(anchor.x, anchor.y, clearance);
+      if (!nearest) return obstacle;
+      return {
+        ...obstacle,
+        x: nearest.x - obstacle.w / 2,
+        y: nearest.y - obstacle.h / 2
+      };
+    }
+
     const nearest = findNearestLand(centerX, centerY);
     if (!nearest) return obstacle;
     return {
@@ -1228,7 +1515,21 @@ function buildWorldScenery() {
   }
 
   buildHousePens();
+  connectHousePensByPaths();
   spawnLearningAnimals();
+}
+
+function connectHousePensByPaths() {
+  if (state.world.pens.length < 2) return;
+  const sortedPens = [...state.world.pens].sort((a, b) => a.x - b.x);
+
+  for (let i = 0; i < sortedPens.length - 1; i += 1) {
+    const fromPen = sortedPens[i];
+    const toPen = sortedPens[i + 1];
+    const fromTile = pixelToTile((fromPen.gate.x1 + fromPen.gate.x2) / 2, fromPen.gate.y + 8);
+    const toTile = pixelToTile((toPen.gate.x1 + toPen.gate.x2) / 2, toPen.gate.y + 8);
+    carvePath(fromTile, toTile);
+  }
 }
 
 function spawnLearningAnimals() {
@@ -1288,19 +1589,19 @@ function buildHousePens() {
     const frontW = wHouse - depth;
     const frontH = hHouse - 7;
 
-    const pad = 9;
+    const pad = 30;
     const fx = frontX - pad;
     const fy = frontY - pad;
     const fw = frontW + depth + pad * 2;
     const fh = frontH + depth + pad * 2;
-    const gateW = 16;
+    const gateW = 34;
     const gateCenter = fx + fw / 2;
 
     const houseCenterX = x + wHouse / 2;
     const houseCenterY = y + hHouse / 2;
     const islandId = findClosestIslandId(houseCenterX, houseCenterY);
 
-    return {
+    const pen = {
       id: `pen-${index}`,
       islandId,
       x: fx,
@@ -1313,7 +1614,24 @@ function buildHousePens() {
         y: fy + fh
       }
     };
+
+    carvePenEntrancePath(pen);
+    return pen;
   });
+}
+
+function carvePenEntrancePath(pen) {
+  const island = state.islands.find((item) => item.id === pen.islandId);
+  if (!island) return;
+
+  const gateMidX = (pen.gate.x1 + pen.gate.x2) / 2;
+  const outsideY = pen.gate.y + 8;
+  const gateTile = pixelToTile(gateMidX, outsideY);
+  const islandTile = pixelToTile(island.gate.x, island.gate.y);
+
+  addPathTile(gateTile.tx, gateTile.ty);
+  addPathTile(gateTile.tx, gateTile.ty - 1);
+  carvePath(gateTile, islandTile);
 }
 
 function randomPointInPen(pen, seedBias = 0.5) {
@@ -1321,7 +1639,7 @@ function randomPointInPen(pen, seedBias = 0.5) {
   for (let i = 0; i < 20; i += 1) {
     const rx = pen.x + margin + (pen.w - margin * 2) * seededNoise((pen.x + i * 17) * seedBias, pen.y + seedBias * 13);
     const ry = pen.y + margin + (pen.h - margin * 2) * seededNoise((pen.y + i * 23) * seedBias, pen.x + seedBias * 17);
-    if (isOnLand(rx, ry)) {
+    if (isOnLand(rx, ry) && !isInsideAnyHouse(rx, ry, 12)) {
       return { x: rx, y: ry };
     }
   }
@@ -1480,6 +1798,39 @@ function findNearestLand(px, py) {
   return best;
 }
 
+function findNearestLandWithClearance(px, py, clearance) {
+  const { cols, rows, tileSize, tiles } = state.world;
+  let best = null;
+  let bestDist = Infinity;
+
+  for (let y = 0; y < rows; y += 1) {
+    for (let x = 0; x < cols; x += 1) {
+      if (tiles[y][x] !== 1) continue;
+      const cx = x * tileSize + tileSize / 2;
+      const cy = y * tileSize + tileSize / 2;
+      if (!isClearanceOnLand(cx, cy, clearance)) continue;
+      const d = distance(px, py, cx, cy);
+      if (d < bestDist) {
+        bestDist = d;
+        best = { x: cx, y: cy };
+      }
+    }
+  }
+
+  return best || findNearestLand(px, py);
+}
+
+function isClearanceOnLand(cx, cy, clearance) {
+  const points = 18;
+  for (let i = 0; i < points; i += 1) {
+    const angle = (i / points) * Math.PI * 2;
+    const px = cx + Math.cos(angle) * clearance;
+    const py = cy + Math.sin(angle) * clearance;
+    if (!isOnLand(px, py)) return false;
+  }
+  return true;
+}
+
 function loadIsland(islandId) {
   const island = state.islands.find((item) => item.id === islandId);
   if (!island) return;
@@ -1488,6 +1839,7 @@ function loadIsland(islandId) {
   state.questionIndex = 0;
   state.selectedOption = null;
   state.currentChallenge = island.challenge || null;
+  state.challengeContext = { type: "study", islandId: island.id };
   state.selectedChallengeOption = null;
   el.phaseTitle.textContent = island.name;
   el.contentBox.textContent = island.content;
@@ -1523,6 +1875,7 @@ function renderIslandChallenge(island) {
   }
 
   el.islandChallengeBox.classList.remove("hidden");
+  el.checkChallengeBtn.textContent = "Responder desafio";
   el.challengeTitle.textContent = `Desafio • ${island.name}`;
   el.challengeText.textContent = challenge.prompt;
   el.challengeFeedback.textContent = "";
@@ -1542,14 +1895,62 @@ function renderIslandChallenge(island) {
   }
 }
 
+function openUnlockEvaluation(island) {
+  state.currentIsland = island;
+  state.currentChallenge = island.unlockTest || null;
+  state.challengeContext = { type: "unlock", islandId: island.id };
+  state.selectedChallengeOption = null;
+
+  if (!state.currentChallenge) return;
+
+  el.phaseTitle.textContent = `${island.name} (Bloqueada)`;
+  el.contentBox.textContent = "Complete a avaliação para liberar o acesso da ilha.";
+  el.questionCard.classList.add("hidden");
+
+  el.islandChallengeBox.classList.remove("hidden");
+  el.checkChallengeBtn.textContent = "Fazer avaliação";
+  el.challengeTitle.textContent = `Avaliação de desbloqueio • ${island.name}`;
+  el.challengeText.textContent = state.currentChallenge.prompt;
+  el.challengeFeedback.textContent = "";
+  el.challengeOptions.innerHTML = "";
+
+  state.currentChallenge.options.forEach((option) => {
+    const label = document.createElement("label");
+    label.innerHTML = `<input type="radio" name="challengeOpt" value="${option}"> ${option}`;
+    label.querySelector("input").addEventListener("change", (event) => {
+      state.selectedChallengeOption = event.target.value;
+    });
+    el.challengeOptions.appendChild(label);
+  });
+}
+
 function checkIslandChallenge() {
-  if (!state.currentIsland || !state.currentChallenge) return;
+  if (!state.currentIsland || !state.currentChallenge || !state.challengeContext) return;
   if (!state.selectedChallengeOption) {
     el.challengeFeedback.innerHTML = '<span class="bad">Selecione uma opção.</span>';
     return;
   }
 
   const correct = state.selectedChallengeOption === state.currentChallenge.answer;
+  if (state.challengeContext.type === "unlock") {
+    if (!correct) {
+      el.challengeFeedback.innerHTML = '<span class="bad">Avaliação não concluída. Tente novamente.</span>';
+      return;
+    }
+
+    const island = state.islands.find((item) => item.id === state.challengeContext.islandId);
+    if (!island) return;
+    island.locked = false;
+    rebuildLockedPassages();
+    state.player.coins += 10;
+    state.player.xp += 20;
+    updateStats();
+    showDialogue(`${island.name} desbloqueada!`, { durationMs: 1700 });
+    el.challengeFeedback.innerHTML = '<span class="good">Ilha desbloqueada! +20 XP e +10 moedas.</span>';
+    loadIsland(island.id);
+    return;
+  }
+
   if (correct) {
     if (!state.solvedChallenges[state.currentIsland.id]) {
       state.player.xp += 12;
@@ -1580,9 +1981,10 @@ function showAnimalFlashcard(animal) {
   const island = state.islands.find((item) => item.id === animal.islandId);
   const islandName = island ? island.name : "Ilha";
   el.flashcardBox.classList.remove("hidden");
+  el.flashcardBox.setAttribute("data-animal-id", animal.id);
   el.flashcardBox.innerHTML = `
-    <h4>${animal.name} (${animal.type === "cow" ? "Vaquinha" : "Ovelha"})</h4>
-    <small>Contexto: ${islandName}</small>
+    <h4>💬 ${animal.name} (${animal.type === "cow" ? "Vaquinha" : "Ovelha"})</h4>
+    <small>Contexto da conversa: ${islandName}</small>
     <p><strong>Pergunta:</strong> ${card.q}</p>
     <p><strong>Resposta:</strong> ${card.a}</p>
     <div class="actions" style="margin-top:8px;">
@@ -1647,12 +2049,14 @@ function buildIslandNotesDeck(islandId) {
 }
 
 function hideFlashcard() {
+  el.flashcardBox.removeAttribute("data-animal-id");
   el.flashcardBox.classList.add("hidden");
 }
 
 function closeAnimalFlashcard() {
   state.world.lockedAnimalId = null;
   hideFlashcard();
+  if (state.dialogue.sticky) hideDialogue();
 }
 
 function updateAnimals(dt) {
@@ -1687,8 +2091,9 @@ function updateAnimals(dt) {
 
     const insideX = nextX >= minX && nextX <= maxX;
     const insideY = nextY >= minY && nextY <= maxY;
+    const overlappingHouse = isInsideAnyHouse(nextX, nextY, 10);
 
-    if (insideX && insideY && isOnLand(nextX, nextY)) {
+    if (insideX && insideY && isOnLand(nextX, nextY) && !overlappingHouse) {
       animal.x = nextX;
       animal.y = nextY;
     } else {
@@ -1703,6 +2108,85 @@ function updateAnimals(dt) {
       animal.vy = (seededNoise(animal.x + 1, animal.y + 1) - 0.5) * 0.9;
       animal.idleTime = 18;
     }
+  }
+}
+
+function isInsideAnyHouse(x, y, pad = 0) {
+  for (const obstacle of state.world.obstacles) {
+    if (obstacle.kind !== "house") continue;
+    if (
+      x > obstacle.x - pad &&
+      x < obstacle.x + obstacle.w + pad &&
+      y > obstacle.y - pad &&
+      y < obstacle.y + obstacle.h + pad
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function ensureMusicInitialized() {
+  if (state.music.initialized) return;
+  if (typeof window.AudioContext === "undefined" && typeof window.webkitAudioContext === "undefined") return;
+
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const context = new AudioCtx();
+  const masterGain = context.createGain();
+  masterGain.gain.value = 0;
+  masterGain.connect(context.destination);
+
+  state.music.context = context;
+  state.music.masterGain = masterGain;
+  state.music.initialized = true;
+
+  startAmbientMusicLoop();
+}
+
+function startAmbientMusicLoop() {
+  const pattern = [261.63, 329.63, 392.0, 329.63, 293.66, 349.23, 392.0, 349.23];
+  const stepMs = 900;
+
+  const id = setInterval(() => {
+    if (!state.music.enabled || !state.music.context || !state.music.masterGain) return;
+    const now = state.music.context.currentTime;
+    const freq = pattern[Math.floor((Date.now() / stepMs) % pattern.length)];
+
+    const osc = state.music.context.createOscillator();
+    const gain = state.music.context.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(freq, now);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.06, now + 0.08);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.78);
+
+    osc.connect(gain);
+    gain.connect(state.music.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.8);
+  }, stepMs);
+
+  state.music.intervals.push(id);
+}
+
+function toggleBackgroundMusic() {
+  ensureMusicInitialized();
+  if (!state.music.context || !state.music.masterGain) return;
+
+  if (state.music.context.state === "suspended") {
+    state.music.context.resume();
+  }
+
+  state.music.enabled = !state.music.enabled;
+  const now = state.music.context.currentTime;
+  if (state.music.enabled) {
+    state.music.masterGain.gain.cancelScheduledValues(now);
+    state.music.masterGain.gain.linearRampToValueAtTime(0.5, now + 0.4);
+    el.musicToggleBtn.textContent = "🎵 Música: On";
+  } else {
+    state.music.masterGain.gain.cancelScheduledValues(now);
+    state.music.masterGain.gain.linearRampToValueAtTime(0.0001, now + 0.25);
+    el.musicToggleBtn.textContent = "🎵 Música: Off";
   }
 }
 
