@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Knowlands - Escolha seu Personagem</title>
+  <link rel="stylesheet" href="select.css" />
+</head>
+<body>
+  <div class="stars-bg" aria-hidden="true"></div>
+
+  <div class="select-page">
+    <h1>Escolha seu Explorador</h1>
+    <p class="subtitle">Cada explorador tem um estilo unico para sua jornada nas Ilhas do Conhecimento</p>
+
+    <div class="characters-grid">
+      <div class="char-card" data-char="luna">
+        <canvas class="char-preview" width="120" height="160"></canvas>
+        <h3>Luna</h3>
+        <p>A sabia mistica das estrelas</p>
+      </div>
+
+      <div class="char-card" data-char="blaze">
+        <canvas class="char-preview" width="120" height="160"></canvas>
+        <h3>Blaze</h3>
+        <p>O guerreiro destemido do saber</p>
+      </div>
+
+      <div class="char-card" data-char="coral">
+        <canvas class="char-preview" width="120" height="160"></canvas>
+        <h3>Coral</h3>
+        <p>A exploradora dos mares do conhecimento</p>
+      </div>
+
+      <div class="char-card" data-char="pixel">
+        <canvas class="char-preview" width="120" height="160"></canvas>
+        <h3>Pixel</h3>
+        <p>O genio digital da era moderna</p>
+      </div>
+
+      <div class="char-card" data-char="flora">
+        <canvas class="char-preview" width="120" height="160"></canvas>
+        <h3>Flora</h3>
+        <p>A guardia da sabedoria natural</p>
+      </div>
+    </div>
+
+    <button class="btn-play" id="playBtn" disabled>Jogar!</button>
+  </div>
+
+  <script src="select.js"></script>
+</body>
+</html>

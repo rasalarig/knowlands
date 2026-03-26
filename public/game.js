@@ -12,6 +12,41 @@
     window.location.href = '/';
     return;
   }
+  const characterId = sessionStorage.getItem('characterId') || 'luna';
+
+  // ---- Character definitions ----
+  const charDefs = {
+    luna: {
+      robeColor: '#5c2d91', robeHighlight: '#7b3fc4',
+      hatColor: '#4a1d80', hatAccent: '#c0c0c0',
+      glowColor: 'rgba(135,206,250,0.15)', special: 'moon',
+      particleColor: '#add8e6'
+    },
+    blaze: {
+      robeColor: '#cc3300', robeHighlight: '#ff5722',
+      hatColor: '#8b0000', hatAccent: '#ffd700',
+      glowColor: 'rgba(255,120,0,0.15)', special: 'fire',
+      particleColor: '#ff6600'
+    },
+    coral: {
+      robeColor: '#008080', robeHighlight: '#20b2aa',
+      hatColor: '#005f5f', hatAccent: '#40e0d0',
+      glowColor: 'rgba(0,200,200,0.15)', special: 'water',
+      particleColor: '#00ced1'
+    },
+    pixel: {
+      robeColor: '#1a1a1a', robeHighlight: '#333333',
+      hatColor: '#0d0d0d', hatAccent: '#39ff14',
+      glowColor: 'rgba(57,255,20,0.15)', special: 'digital',
+      particleColor: '#39ff14'
+    },
+    flora: {
+      robeColor: '#2e7d32', robeHighlight: '#4caf50',
+      hatColor: '#1b5e20', hatAccent: '#ffd700',
+      glowColor: 'rgba(76,175,80,0.15)', special: 'nature',
+      particleColor: '#66bb6a'
+    }
+  };
 
   // ---- DOM refs ----
   const canvas = document.getElementById('gameCanvas');
@@ -374,6 +409,7 @@
         existing.ty = p.y;
         existing.name = p.name;
         existing.color = p.color;
+        existing.characterId = p.characterId || 'luna';
         existing.score = p.score;
         existing.health = p.health;
         existing.level = p.level;
@@ -384,6 +420,7 @@
         newRemote[p.id] = {
           x: p.x, y: p.y, tx: p.x, ty: p.y,
           name: p.name, color: p.color, score: p.score,
+          characterId: p.characterId || 'luna',
           health: p.health, level: p.level,
           direction: p.direction || 'down',
           isMoving: p.isMoving || false
@@ -456,7 +493,7 @@
   });
 
   // ---- Join ----
-  socket.emit('join', { name: username });
+  socket.emit('join', { name: username, characterId: characterId });
 
   // ================================================================
   //  HELPER FUNCTIONS
@@ -1153,11 +1190,14 @@
   // ================================================================
   //  RENDERING - PLAYER CHARACTER
   // ================================================================
-  function drawCharacter(x, y, color, name, health, isSelf, level, direction, isMoving) {
+  function drawCharacter(x, y, color, name, health, isSelf, level, direction, isMoving, charType) {
     const sx = x - cam.x;
     const sy = y - cam.y;
 
     if (sx < -60 || sx > canvas.width + 60 || sy < -80 || sy > canvas.height + 60) return;
+
+    const cid = charType || 'luna';
+    const cdef = charDefs[cid] || charDefs.luna;
 
     direction = direction || 'down';
     const bob = isMoving ? Math.sin(walkCycle * (isSelf ? 1 : 0.8)) * 3 : Math.sin(gameTime * 2) * 1.5;
@@ -1171,13 +1211,7 @@
 
     // Glow under character
     if (isSelf) {
-      ctx.fillStyle = color.replace(')', ', 0.15)').replace('rgb', 'rgba');
-      if (color.startsWith('#')) {
-        const r = parseInt(color.slice(1, 3), 16) || 100;
-        const g = parseInt(color.slice(3, 5), 16) || 100;
-        const b = parseInt(color.slice(5, 7), 16) || 100;
-        ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',0.15)';
-      }
+      ctx.fillStyle = cdef.glowColor;
       ctx.beginPath();
       ctx.arc(sx, sy + 10, 20, 0, Math.PI * 2);
       ctx.fill();
@@ -1195,8 +1229,8 @@
     ctx.fillRect(sx - 6 + legOffset, drawY + 14, 6, 3);
     ctx.fillRect(sx + 0 - legOffset, drawY + 14, 6, 3);
 
-    // Robe body
-    ctx.fillStyle = color;
+    // Robe body (character color)
+    ctx.fillStyle = cdef.robeColor;
     ctx.beginPath();
     ctx.moveTo(sx - 10, drawY - 2);
     ctx.lineTo(sx - 8, drawY + 10);
@@ -1206,7 +1240,8 @@
     ctx.fill();
 
     // Body highlight
-    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.fillStyle = cdef.robeHighlight;
+    ctx.globalAlpha = 0.35;
     ctx.beginPath();
     ctx.moveTo(sx - 6, drawY - 1);
     ctx.lineTo(sx - 4, drawY + 8);
@@ -1214,6 +1249,7 @@
     ctx.lineTo(sx + 4, drawY - 1);
     ctx.closePath();
     ctx.fill();
+    ctx.globalAlpha = 1;
 
     // Head
     ctx.fillStyle = '#ffccbc';
@@ -1221,24 +1257,8 @@
     ctx.arc(sx, drawY - 10, 10, 0, Math.PI * 2);
     ctx.fill();
 
-    // Wizard hat
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(sx - 11, drawY - 16);
-    ctx.lineTo(sx + 2, drawY - 34);
-    ctx.lineTo(sx + 11, drawY - 16);
-    ctx.closePath();
-    ctx.fill();
-
-    // Hat brim
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.ellipse(sx, drawY - 16, 13, 3, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Hat star
-    ctx.fillStyle = '#ffd700';
-    drawStar(sx + 1, drawY - 26, 3, 5, '#ffd700');
+    // Character-specific hat
+    drawCharHat(ctx, sx, drawY, cid, cdef);
 
     // Eyes based on direction
     const eyeOffX = direction === 'left' ? -2 : direction === 'right' ? 2 : 0;
@@ -1262,6 +1282,19 @@
     ctx.arc(sx + 3.5 + eyeOffX * 0.8, drawY - 11 + eyeOffY * 0.5, 1.5, 0, Math.PI * 2);
     ctx.fill();
 
+    // Blaze special: glowing eyes overlay
+    if (cid === 'blaze') {
+      ctx.fillStyle = '#ff4400';
+      ctx.globalAlpha = 0.4 + Math.sin(gameTime * 4) * 0.2;
+      ctx.beginPath();
+      ctx.arc(sx - 3.5, drawY - 11, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(sx + 3.5, drawY - 11, 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
     // Mouth (small smile)
     if (direction !== 'up') {
       ctx.strokeStyle = '#5d4037';
@@ -1270,6 +1303,9 @@
       ctx.arc(sx, drawY - 6, 3, 0.1 * Math.PI, 0.9 * Math.PI);
       ctx.stroke();
     }
+
+    // Character-specific special effects
+    drawCharSpecial(ctx, sx, drawY, cid, cdef, x, isSelf);
 
     // Floating book orbiting character
     const bookAngle = gameTime * 1.5 + (isSelf ? 0 : x * 0.01);
@@ -1301,6 +1337,209 @@
       const pct = Math.max(0, health) / 100;
       ctx.fillStyle = pct > 0.5 ? '#76ff03' : pct > 0.25 ? '#ff6d00' : '#ff1744';
       ctx.fillRect(bx, by, barW * pct, barH);
+    }
+  }
+
+  // ---- Character-specific hat drawing ----
+  function drawCharHat(ctx, sx, drawY, cid, cdef) {
+    switch (cid) {
+      case 'luna':
+        // Tall pointy wizard hat with stars
+        ctx.fillStyle = cdef.hatColor;
+        ctx.beginPath();
+        ctx.moveTo(sx - 11, drawY - 16);
+        ctx.lineTo(sx + 2, drawY - 34);
+        ctx.lineTo(sx + 11, drawY - 16);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(sx, drawY - 16, 13, 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Stars
+        ctx.fillStyle = cdef.hatAccent;
+        drawStar(sx - 1, drawY - 26, 2.5, 5, cdef.hatAccent);
+        drawStar(sx + 5, drawY - 21, 1.5, 5, cdef.hatAccent);
+        break;
+
+      case 'blaze':
+        // Knight helmet
+        ctx.fillStyle = cdef.hatColor;
+        ctx.beginPath();
+        ctx.arc(sx, drawY - 13, 11, Math.PI, 0);
+        ctx.closePath();
+        ctx.fill();
+        // Visor slit
+        ctx.fillStyle = '#333';
+        ctx.fillRect(sx - 9, drawY - 14, 18, 2);
+        // Flame crest
+        for (let fi = 0; fi < 3; fi++) {
+          const fx = sx + (fi - 1) * 4;
+          const fh = 5 + Math.sin(gameTime * 4 + fi) * 3;
+          ctx.fillStyle = fi === 1 ? cdef.hatAccent : '#ff6600';
+          ctx.beginPath();
+          ctx.moveTo(fx - 2, drawY - 20);
+          ctx.lineTo(fx, drawY - 20 - fh);
+          ctx.lineTo(fx + 2, drawY - 20);
+          ctx.closePath();
+          ctx.fill();
+        }
+        break;
+
+      case 'coral':
+        // Captain hat
+        ctx.fillStyle = cdef.hatColor;
+        ctx.beginPath();
+        ctx.ellipse(sx, drawY - 16, 13, 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillRect(sx - 9, drawY - 22, 18, 7);
+        ctx.beginPath();
+        ctx.ellipse(sx, drawY - 22, 9, 2.5, 0, Math.PI, 0);
+        ctx.fill();
+        // Anchor emblem
+        ctx.fillStyle = cdef.hatAccent;
+        ctx.beginPath();
+        ctx.arc(sx, drawY - 19, 2, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+
+      case 'pixel':
+        // VR headset
+        ctx.fillStyle = cdef.hatColor;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(sx - 11, drawY - 19, 22, 8, 3);
+        } else {
+          ctx.rect(sx - 11, drawY - 19, 22, 8);
+        }
+        ctx.fill();
+        // Visor glow
+        const visorAlpha = 0.5 + Math.sin(gameTime * 3) * 0.3;
+        ctx.fillStyle = 'rgba(57,255,20,' + visorAlpha + ')';
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(sx - 9, drawY - 18, 18, 5, 2);
+        } else {
+          ctx.rect(sx - 9, drawY - 18, 18, 5);
+        }
+        ctx.fill();
+        break;
+
+      case 'flora':
+        // Crown of leaves
+        for (let lfi = 0; lfi < 5; lfi++) {
+          const la = (lfi / 5) * Math.PI;
+          const lr = 12;
+          const lx = sx + Math.cos(la - Math.PI) * lr;
+          const ly = drawY - 17 + Math.sin(la - Math.PI) * lr * 0.35;
+          ctx.fillStyle = lfi % 2 === 0 ? '#4caf50' : '#81c784';
+          ctx.beginPath();
+          ctx.ellipse(lx, ly, 4, 2.5, la * 0.5, 0, Math.PI * 2);
+          ctx.fill();
+          if (lfi % 2 === 0) {
+            ctx.fillStyle = lfi === 0 ? '#ff6b9d' : lfi === 2 ? '#ffd700' : '#ff9800';
+            ctx.beginPath();
+            ctx.arc(lx, ly - 1.5, 1.8, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        break;
+
+      default:
+        // Default wizard hat (fallback)
+        ctx.fillStyle = cdef.hatColor || color;
+        ctx.beginPath();
+        ctx.moveTo(sx - 11, drawY - 16);
+        ctx.lineTo(sx + 2, drawY - 34);
+        ctx.lineTo(sx + 11, drawY - 16);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(sx, drawY - 16, 13, 3, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ffd700';
+        drawStar(sx + 1, drawY - 26, 3, 5, '#ffd700');
+        break;
+    }
+  }
+
+  // ---- Character-specific special effects ----
+  function drawCharSpecial(ctx, sx, drawY, cid, cdef, worldX, isSelf) {
+    switch (cid) {
+      case 'luna':
+        // Crescent moon floating nearby
+        const moonAngle = gameTime * 1.2;
+        const moonX = sx + Math.cos(moonAngle) * 20;
+        const moonY = drawY - 18 + Math.sin(moonAngle * 0.7) * 4;
+        ctx.fillStyle = '#fffacd';
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.arc(moonX, moonY, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = cdef.robeColor;
+        ctx.beginPath();
+        ctx.arc(moonX + 1.5, moonY - 0.8, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        break;
+
+      case 'blaze':
+        // Fire particles at feet
+        for (let fi = 0; fi < 3; fi++) {
+          const ffx = sx - 5 + fi * 5;
+          const ffh = 3 + Math.sin(gameTime * 5 + fi * 2) * 2;
+          ctx.fillStyle = fi === 1 ? 'rgba(255,200,0,0.4)' : 'rgba(255,100,0,0.35)';
+          ctx.beginPath();
+          ctx.moveTo(ffx - 2, drawY + 16);
+          ctx.lineTo(ffx, drawY + 16 - ffh);
+          ctx.lineTo(ffx + 2, drawY + 16);
+          ctx.closePath();
+          ctx.fill();
+        }
+        break;
+
+      case 'coral':
+        // Water bubbles
+        for (let bi = 0; bi < 3; bi++) {
+          const bx = sx - 12 + bi * 12;
+          const by = drawY + Math.sin(gameTime * 2.5 + bi * 2) * 10;
+          ctx.strokeStyle = 'rgba(0,206,209,0.35)';
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.arc(bx, by, 2 + Math.sin(gameTime + bi) * 0.5, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        break;
+
+      case 'pixel':
+        // Binary digits
+        ctx.font = '8px monospace';
+        ctx.fillStyle = cdef.hatAccent;
+        for (let di = 0; di < 3; di++) {
+          const dx = sx - 14 + di * 14;
+          const ddy = drawY - 5 + Math.sin(gameTime * 2 + di * 2) * 12;
+          ctx.globalAlpha = 0.25 + Math.sin(gameTime * 3 + di) * 0.15;
+          ctx.fillText(Math.sin(gameTime + di) > 0 ? '1' : '0', dx, ddy);
+        }
+        ctx.globalAlpha = 1;
+        break;
+
+      case 'flora':
+        // Floating leaves
+        for (let fli = 0; fli < 2; fli++) {
+          const flx = sx - 16 + fli * 32;
+          const fly = drawY + Math.sin(gameTime * 1.8 + fli * 3) * 12;
+          ctx.save();
+          ctx.translate(flx, fly);
+          ctx.rotate(gameTime * 1.5 + fli);
+          ctx.fillStyle = fli === 0 ? '#4caf50' : '#8bc34a';
+          ctx.globalAlpha = 0.45;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 3.5, 1.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.restore();
+        }
+        break;
     }
   }
 
@@ -1774,7 +2013,7 @@
     // Draw remote players
     for (const id in remotePlayers) {
       const rp = remotePlayers[id];
-      drawCharacter(rp.x, rp.y, rp.color, rp.name, rp.health, false, rp.level, rp.direction, rp.isMoving);
+      drawCharacter(rp.x, rp.y, rp.color, rp.name, rp.health, false, rp.level, rp.direction, rp.isMoving, rp.characterId);
     }
 
     // Draw local player
@@ -1782,7 +2021,7 @@
       drawCharacter(
         localPlayer.x, localPlayer.y, localPlayer.color,
         localPlayer.name, localPlayer.health, true,
-        localPlayer.level, playerDirection, playerIsMoving
+        localPlayer.level, playerDirection, playerIsMoving, characterId
       );
     }
 

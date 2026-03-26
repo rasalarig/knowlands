@@ -522,6 +522,7 @@ setInterval(() => {
   }));
   const playerArr = Object.values(players).map(p => ({
     id: p.id, name: p.name, x: p.x, y: p.y, color: p.color,
+    characterId: p.characterId || 'luna',
     score: p.score, health: p.health, xp: p.xp, level: p.level,
     coins: p.coins, direction: p.direction, isMoving: p.isMoving
   }));
@@ -540,9 +541,12 @@ io.on('connection', (socket) => {
   socket.on('join', (data) => {
     const spawn = randomSpawnOnIsland();
     const color = nextColor();
+    const validChars = ['luna', 'blaze', 'coral', 'pixel', 'flora'];
+    const charId = validChars.includes(data.characterId) ? data.characterId : 'luna';
     players[socket.id] = {
       id: socket.id,
       name: data.name || 'Jogador',
+      characterId: charId,
       x: spawn.x,
       y: spawn.y,
       color,
