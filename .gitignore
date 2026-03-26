@@ -1,0 +1,8 @@
+node_modules/
+.env
+
+# Sprintfy agent config (auto-generated)
+.claude_settings.json
+.worktrees/
+.sprintfy/evidence/
+.sprintfy_session_history.json

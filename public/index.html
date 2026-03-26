@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Knowlands - Login</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="page">
+    <video class="bg-video" autoplay muted loop playsinline>
+      <source src="bg.mp4" type="video/mp4" />
+    </video>
+
+    <div class="overlay" aria-hidden="true"></div>
+
+    <section class="auth" aria-label="Tela de login">
+      <div class="auth__top">
+        <div class="brand">
+          <img src="logo.png" class="brand__logo" alt="Logo">
+          <div>
+            <div class="brand__name">Knowlands</div>
+            <div class="brand__sub">Multiplayer Island Game</div>
+          </div>
+        </div>
+
+        <h1>Faca login</h1>
+        <p>Entre com seu e-mail para jogar. Voce tambem pode criar uma conta.</p>
+      </div>
+
+      <div class="auth__body">
+        <div id="loginError" class="msg msg--error" style="display:none;"></div>
+        <div id="loginSuccess" class="msg msg--success" style="display:none;"></div>
+
+        <form id="loginForm">
+          <div class="field">
+            <div>
+              <label for="email">E-mail</label>
+              <input
+                class="input"
+                id="email"
+                name="email"
+                type="email"
+                placeholder="seuemail@exemplo.com"
+                autocomplete="email"
+                required
+              />
+            </div>
+
+            <div>
+              <label for="password">Senha</label>
+              <input
+                class="input"
+                id="password"
+                name="password"
+                type="password"
+                placeholder="********"
+                autocomplete="current-password"
+                required
+              />
+            </div>
+
+            <button class="btn btn--primary" type="submit">Entrar</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="auth__footer">
+        <span>Nao tem conta?</span>
+        <a href="#" id="signupLink">Criar conta</a>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL DE CADASTRO -->
+  <div class="modal" id="signupModal" aria-hidden="true">
+    <div class="modal__box" role="dialog" aria-modal="true" aria-labelledby="signupTitle">
+      <div class="modal__head">
+        <div>
+          <h2 class="modal__title" id="signupTitle">Criar conta</h2>
+          <p>Preencha as informacoes para se cadastrar.</p>
+        </div>
+        <button class="modal__close" type="button" data-close="signupModal" aria-label="Fechar">
+          &times;
+        </button>
+      </div>
+
+      <div id="signupError" class="msg msg--error" style="display:none;"></div>
+      <div id="signupSuccess" class="msg msg--success" style="display:none;"></div>
+
+      <form id="signupForm" class="field">
+        <div>
+          <label for="signupName">Nome</label>
+          <input
+            class="input"
+            id="signupName"
+            name="signupName"
+            type="text"
+            placeholder="Seu nome"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="signupEmail">E-mail</label>
+          <input
+            class="input"
+            id="signupEmail"
+            name="signupEmail"
+            type="email"
+            placeholder="seuemail@exemplo.com"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="signupPassword">Senha</label>
+          <input
+            class="input"
+            id="signupPassword"
+            name="signupPassword"
+            type="password"
+            placeholder="Crie uma senha"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="signupConfirmPassword">Confirmar senha</label>
+          <input
+            class="input"
+            id="signupConfirmPassword"
+            name="signupConfirmPassword"
+            type="password"
+            placeholder="Repita a senha"
+            required
+          />
+        </div>
+
+        <div class="modal__actions">
+          <button class="btn btn--primary" type="submit">Cadastrar</button>
+          <button class="btn btn--secondary" type="button" data-close="signupModal">Cancelar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

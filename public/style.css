@@ -341,3 +341,24 @@ a:hover {
     padding: 16px;
   }
 }
+
+/* Inline messages */
+.msg {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.msg--error {
+  background: rgba(217, 45, 32, 0.12);
+  color: #d92d20;
+  border: 1px solid rgba(217, 45, 32, 0.25);
+}
+
+.msg--success {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
