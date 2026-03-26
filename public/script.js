@@ -8,6 +8,12 @@ async function initGoogleAuth() {
     googleClientId = data.clientId;
 
     if (googleClientId) {
+      // Show Google button and divider (hidden by default)
+      const container = document.getElementById('googleBtnContainer');
+      if (container) container.style.display = '';
+      const divider = document.getElementById('googleDivider');
+      if (divider) divider.style.display = '';
+
       // Initialize Google Identity Services
       google.accounts.id.initialize({
         client_id: googleClientId,
@@ -21,25 +27,14 @@ async function initGoogleAuth() {
         btn.addEventListener('click', () => {
           google.accounts.id.prompt((notification) => {
             if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-              // Fallback: use popup mode
               google.accounts.id.prompt();
             }
           });
         });
       }
-    } else {
-      // No client ID configured - hide Google button
-      const container = document.getElementById('googleBtnContainer');
-      if (container) container.style.display = 'none';
-      const divider = document.querySelector('.divider');
-      if (divider) divider.style.display = 'none';
     }
   } catch (err) {
     console.warn('Google Auth not available:', err);
-    const container = document.getElementById('googleBtnContainer');
-    if (container) container.style.display = 'none';
-    const divider = document.querySelector('.divider');
-    if (divider) divider.style.display = 'none';
   }
 }
 
