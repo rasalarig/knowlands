@@ -79,7 +79,6 @@ app.post('/api/auth/google', async (req, res) => {
     const name = payload.name || payload.email.split('@')[0];
     const picture = payload.picture || '';
 
-    // Auto-create user if first time
     if (!users.has(email)) {
       users.set(email, { name, email, hash: null, googleUser: true, picture });
     }
@@ -96,16 +95,83 @@ app.get('/api/auth/google-client-id', (req, res) => {
   res.json({ clientId: GOOGLE_CLIENT_ID });
 });
 
-// --------------- Game State ---------------
-const MAP_W = 3000;
-const MAP_H = 3000;
+// ===============================================================
+//  QUIZ QUESTION BANK
+// ===============================================================
+const questions = {
+  matematica: [
+    { q: "Quanto e 7 x 8?", options: ["54", "56", "58", "64"], answer: 1 },
+    { q: "Raiz quadrada de 144?", options: ["10", "11", "12", "14"], answer: 2 },
+    { q: "Quanto e 15% de 200?", options: ["25", "30", "35", "40"], answer: 1 },
+    { q: "Qual e o valor de pi aproximado?", options: ["3.14", "2.71", "1.61", "3.41"], answer: 0 },
+    { q: "2 ao cubo e igual a?", options: ["6", "8", "9", "12"], answer: 1 },
+    { q: "Quanto e 144 / 12?", options: ["10", "11", "12", "13"], answer: 2 },
+    { q: "Qual e o MMC de 4 e 6?", options: ["12", "24", "6", "8"], answer: 0 },
+    { q: "Quanto e 3! (fatorial)?", options: ["3", "6", "9", "12"], answer: 1 },
+    { q: "Area de um quadrado de lado 5?", options: ["20", "25", "30", "10"], answer: 1 },
+    { q: "Soma dos angulos de um triangulo?", options: ["90 graus", "180 graus", "270 graus", "360 graus"], answer: 1 }
+  ],
+  historia: [
+    { q: "Em que ano o Brasil foi descoberto?", options: ["1498", "1500", "1502", "1510"], answer: 1 },
+    { q: "Quem proclamou a independencia do Brasil?", options: ["Tiradentes", "D. Pedro I", "D. Pedro II", "Getulio"], answer: 1 },
+    { q: "Revolucao Francesa comecou em?", options: ["1776", "1789", "1799", "1804"], answer: 1 },
+    { q: "Primeira Guerra Mundial comecou em?", options: ["1912", "1914", "1916", "1918"], answer: 1 },
+    { q: "Quem pintou a Mona Lisa?", options: ["Michelangelo", "Da Vinci", "Rafael", "Donatello"], answer: 1 },
+    { q: "Egito Antigo ficava em qual continente?", options: ["Asia", "Europa", "Africa", "America"], answer: 2 },
+    { q: "Quem foi o primeiro presidente do Brasil?", options: ["Getulio", "Deodoro", "Prudente", "Floriano"], answer: 1 },
+    { q: "A escravidao acabou no Brasil em?", options: ["1822", "1850", "1888", "1900"], answer: 2 },
+    { q: "Imperio Romano caiu em que seculo?", options: ["III", "IV", "V", "VI"], answer: 2 },
+    { q: "Guerra Fria foi entre?", options: ["EUA e China", "EUA e URSS", "EUA e Japao", "EUA e UK"], answer: 1 }
+  ],
+  ciencias: [
+    { q: "Qual e a formula da agua?", options: ["CO2", "H2O", "O2", "NaCl"], answer: 1 },
+    { q: "Velocidade da luz (km/s)?", options: ["150.000", "200.000", "300.000", "400.000"], answer: 2 },
+    { q: "Quantos ossos tem o corpo humano?", options: ["106", "156", "206", "256"], answer: 2 },
+    { q: "Qual planeta e o maior do sistema solar?", options: ["Saturno", "Jupiter", "Netuno", "Urano"], answer: 1 },
+    { q: "DNA significa?", options: ["Acido desoxirribonucleico", "Acido dinucleico", "Acido dioxirribo", "Adenina nucleica"], answer: 0 },
+    { q: "Qual e o elemento mais abundante no universo?", options: ["Oxigenio", "Carbono", "Hidrogenio", "Helio"], answer: 2 },
+    { q: "Fotossintese produz?", options: ["CO2", "Oxigenio", "Nitrogenio", "Metano"], answer: 1 },
+    { q: "Unidade de forca no SI?", options: ["Watt", "Joule", "Newton", "Pascal"], answer: 2 },
+    { q: "Quantos cromossomos tem um humano?", options: ["23", "44", "46", "48"], answer: 2 },
+    { q: "Qual orgao produz insulina?", options: ["Figado", "Pancreas", "Rim", "Coracao"], answer: 1 }
+  ],
+  linguas: [
+    { q: "'Hello' em japones?", options: ["Annyeong", "Konnichiwa", "Ni hao", "Sawadee"], answer: 1 },
+    { q: "Qual idioma tem mais falantes nativos?", options: ["Ingles", "Espanhol", "Mandarim", "Hindi"], answer: 2 },
+    { q: "'Obrigado' em frances?", options: ["Grazie", "Merci", "Danke", "Gracias"], answer: 1 },
+    { q: "Quantas letras tem o alfabeto ingles?", options: ["24", "25", "26", "27"], answer: 2 },
+    { q: "'Amor' em italiano?", options: ["Amore", "Amour", "Liebe", "Love"], answer: 0 },
+    { q: "Qual lingua usa o alfabeto cirilico?", options: ["Grego", "Russo", "Arabe", "Japones"], answer: 1 },
+    { q: "'Goodbye' em espanhol?", options: ["Au revoir", "Adios", "Tschuss", "Arrivederci"], answer: 1 },
+    { q: "Plural de 'child' em ingles?", options: ["Childs", "Childrens", "Children", "Childes"], answer: 2 },
+    { q: "O esperanto foi criado por?", options: ["Chomsky", "Zamenhof", "Tolkien", "Saussure"], answer: 1 },
+    { q: "'Bom dia' em alemao?", options: ["Bonjour", "Guten Morgen", "Buenos dias", "Buongiorno"], answer: 1 }
+  ],
+  programacao: [
+    { q: "O que HTML significa?", options: ["HyperText Markup Language", "High Tech ML", "HyperTransfer ML", "Home Tool ML"], answer: 0 },
+    { q: "Qual NAO e linguagem de programacao?", options: ["Python", "Java", "HTML", "C++"], answer: 2 },
+    { q: "console.log() e de qual linguagem?", options: ["Python", "Java", "JavaScript", "C#"], answer: 2 },
+    { q: "O que CSS controla?", options: ["Logica", "Estilo visual", "Banco de dados", "Servidor"], answer: 1 },
+    { q: "Git e usado para?", options: ["Design", "Versionamento", "Compilacao", "Teste"], answer: 1 },
+    { q: "Qual e o operador de igualdade estrita em JS?", options: ["==", "===", "!=", ">="], answer: 1 },
+    { q: "Python e tipagem?", options: ["Estatica", "Dinamica", "Nenhuma", "Fixa"], answer: 1 },
+    { q: "SQL e usado para?", options: ["Estilo", "Banco de dados", "Animacao", "Rede"], answer: 1 },
+    { q: "O que e um array?", options: ["Uma funcao", "Uma lista ordenada", "Um estilo", "Um servidor"], answer: 1 },
+    { q: "Localhost geralmente usa porta?", options: ["80", "443", "3000", "8080"], answer: 2 }
+  ]
+};
+
+// ===============================================================
+//  GAME CONSTANTS
+// ===============================================================
+const MAP_W = 4000;
+const MAP_H = 4000;
 
 const PLAYER_COLORS = [
   '#00e5ff', '#76ff03', '#ffea00', '#ff6d00',
   '#e040fb', '#ff1744', '#00e676', '#2979ff',
   '#f50057', '#00bfa5', '#ffd600', '#d500f9'
 ];
-
 let colorIndex = 0;
 function nextColor() {
   const c = PLAYER_COLORS[colorIndex % PLAYER_COLORS.length];
@@ -113,110 +179,179 @@ function nextColor() {
   return c;
 }
 
-const players = {};   // socketId -> { id, name, x, y, color, score, health }
-const enemies = {};   // id -> { id, x, y, hp, maxHp, type, targetId, vx, vy }
-const bullets = [];   // { id, ownerId, x, y, vx, vy, dist, maxDist, color }
-let enemyIdCounter = 0;
-const MAX_ENEMIES = 20;
-const ENEMY_SPAWN_INTERVAL = 2000;
-
-// Islands (pre-generated so all clients share the same map)
+// ===============================================================
+//  ISLAND DEFINITIONS
+// ===============================================================
 const islands = [
-  { x: 400, y: 400, rx: 260, ry: 200 },
-  { x: 1200, y: 300, rx: 200, ry: 170 },
-  { x: 2400, y: 350, rx: 230, ry: 190 },
-  { x: 700, y: 1100, rx: 310, ry: 250 },
-  { x: 1500, y: 1000, rx: 350, ry: 280 },
-  { x: 2300, y: 1100, rx: 200, ry: 180 },
-  { x: 350, y: 2000, rx: 220, ry: 200 },
-  { x: 1100, y: 2200, rx: 280, ry: 220 },
-  { x: 2000, y: 2100, rx: 260, ry: 210 },
-  { x: 2700, y: 2500, rx: 240, ry: 200 }
+  { id: 'matematica', name: 'Ilha da Matematica', x: 700, y: 700, rx: 380, ry: 320, category: 'matematica', theme: 'blue' },
+  { id: 'historia', name: 'Ilha da Historia', x: 3300, y: 700, rx: 380, ry: 320, category: 'historia', theme: 'brown' },
+  { id: 'ciencias', name: 'Ilha das Ciencias', x: 2000, y: 1600, rx: 400, ry: 340, category: 'ciencias', theme: 'green' },
+  { id: 'linguas', name: 'Ilha das Linguas', x: 700, y: 3300, rx: 380, ry: 320, category: 'linguas', theme: 'purple' },
+  { id: 'programacao', name: 'Ilha da Programacao', x: 3300, y: 3300, rx: 380, ry: 320, category: 'programacao', theme: 'neon' },
+  { id: 'central', name: 'Ilha Central', x: 2000, y: 2800, rx: 450, ry: 380, category: null, theme: 'gold' }
 ];
 
-// Trees placed on islands
-const trees = [];
+// Bridges connecting islands
+const bridges = [
+  { from: 'matematica', to: 'ciencias' },
+  { from: 'historia', to: 'ciencias' },
+  { from: 'ciencias', to: 'central' },
+  { from: 'linguas', to: 'central' },
+  { from: 'programacao', to: 'central' },
+  { from: 'matematica', to: 'linguas' },
+  { from: 'historia', to: 'programacao' }
+];
+
+// Quiz totems per island
+const totems = [];
 islands.forEach(isl => {
-  const count = 3 + Math.floor(Math.random() * 5);
-  for (let i = 0; i < count; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const r = Math.random() * 0.6;
-    trees.push({
-      x: isl.x + Math.cos(angle) * isl.rx * r,
-      y: isl.y + Math.sin(angle) * isl.ry * r,
-      size: 18 + Math.random() * 14
+  if (!isl.category) {
+    // Central island has one totem of each category
+    const cats = ['matematica', 'historia', 'ciencias', 'linguas', 'programacao'];
+    cats.forEach((cat, i) => {
+      const angle = (i / cats.length) * Math.PI * 2;
+      totems.push({
+        id: 'totem_' + isl.id + '_' + i,
+        x: isl.x + Math.cos(angle) * isl.rx * 0.5,
+        y: isl.y + Math.sin(angle) * isl.ry * 0.5,
+        category: cat,
+        island: isl.id
+      });
     });
+  } else {
+    // 3 totems per themed island
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI * 2 + 0.3;
+      totems.push({
+        id: 'totem_' + isl.id + '_' + i,
+        x: isl.x + Math.cos(angle) * isl.rx * 0.45,
+        y: isl.y + Math.sin(angle) * isl.ry * 0.45,
+        category: isl.category,
+        island: isl.id
+      });
+    }
   }
 });
 
-// Rocks placed on islands
-const rocks = [];
-islands.forEach(isl => {
-  const count = 1 + Math.floor(Math.random() * 3);
-  for (let i = 0; i < count; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const r = 0.3 + Math.random() * 0.5;
-    rocks.push({
-      x: isl.x + Math.cos(angle) * isl.rx * r,
-      y: isl.y + Math.sin(angle) * isl.ry * r,
-      size: 10 + Math.random() * 12
-    });
-  }
-});
+// ===============================================================
+//  GAME STATE
+// ===============================================================
+const players = {};   // socketId -> player data
+const enemies = {};   // id -> enemy data
+const bullets = [];   // { id, ownerId, x, y, vx, vy, dist, maxDist, color }
+const activeQuizzes = {}; // socketId -> { enemyId, questionIndex, category, timestamp, totemId }
 
-function isOnIsland(x, y) {
+let enemyIdCounter = 0;
+const MAX_ENEMIES = 30;
+const ENEMY_SPAWN_INTERVAL = 3000;
+const QUIZ_TIME_LIMIT = 10000; // 10 seconds
+
+function getIslandAt(x, y) {
   for (const isl of islands) {
     const dx = x - isl.x;
     const dy = y - isl.y;
-    if ((dx * dx) / (isl.rx * isl.rx) + (dy * dy) / (isl.ry * isl.ry) <= 1) return true;
+    if ((dx * dx) / (isl.rx * isl.rx) + (dy * dy) / (isl.ry * isl.ry) <= 1) return isl;
+  }
+  return null;
+}
+
+function isOnIsland(x, y) {
+  return getIslandAt(x, y) !== null;
+}
+
+function isOnBridge(x, y) {
+  for (const br of bridges) {
+    const fromIsl = islands.find(i => i.id === br.from);
+    const toIsl = islands.find(i => i.id === br.to);
+    if (!fromIsl || !toIsl) continue;
+
+    const dx = toIsl.x - fromIsl.x;
+    const dy = toIsl.y - fromIsl.y;
+    const len = Math.hypot(dx, dy);
+    const nx = dx / len;
+    const ny = dy / len;
+
+    // Project point onto bridge line
+    const px = x - fromIsl.x;
+    const py = y - fromIsl.y;
+    const proj = px * nx + py * ny;
+
+    if (proj < 0 || proj > len) continue;
+
+    // Distance from bridge line
+    const perpDist = Math.abs(px * (-ny) + py * nx);
+    if (perpDist < 30) return true; // bridge width
   }
   return false;
+}
+
+function isOnLand(x, y) {
+  return isOnIsland(x, y) || isOnBridge(x, y);
 }
 
 function randomSpawnOnIsland() {
   const isl = islands[Math.floor(Math.random() * islands.length)];
   const angle = Math.random() * Math.PI * 2;
-  const r = Math.random() * 0.5;
+  const r = Math.random() * 0.4;
   return {
     x: isl.x + Math.cos(angle) * isl.rx * r,
     y: isl.y + Math.sin(angle) * isl.ry * r
   };
 }
 
-function randomEnemySpawn() {
-  // spawn on random island edges or water near islands
-  const isl = islands[Math.floor(Math.random() * islands.length)];
-  const angle = Math.random() * Math.PI * 2;
-  const r = 0.9 + Math.random() * 0.4;
-  return {
-    x: isl.x + Math.cos(angle) * isl.rx * r,
-    y: isl.y + Math.sin(angle) * isl.ry * r
-  };
+function getRandomQuestion(category) {
+  const pool = questions[category];
+  if (!pool || pool.length === 0) return null;
+  const idx = Math.floor(Math.random() * pool.length);
+  return { index: idx, ...pool[idx] };
 }
 
+function getCategoryForEnemy(enemy) {
+  const isl = islands.find(i => i.id === enemy.island);
+  if (isl && isl.category) return isl.category;
+  // If on central island pick random
+  const cats = Object.keys(questions);
+  return cats[Math.floor(Math.random() * cats.length)];
+}
+
+// ===============================================================
+//  ENEMY SPAWNING
+// ===============================================================
 function spawnEnemy() {
   if (Object.keys(enemies).length >= MAX_ENEMIES) return;
   if (Object.keys(players).length === 0) return;
 
-  const pos = randomEnemySpawn();
-  const isBig = Math.random() < 0.3;
+  // Pick a themed island (not central)
+  const themedIslands = islands.filter(i => i.category !== null);
+  const isl = themedIslands[Math.floor(Math.random() * themedIslands.length)];
+
+  const isBoss = Math.random() < 0.15;
+  const angle = Math.random() * Math.PI * 2;
+  const r = 0.3 + Math.random() * 0.5;
+
   const id = 'e' + (++enemyIdCounter);
   enemies[id] = {
     id,
-    x: pos.x,
-    y: pos.y,
-    hp: isBig ? 5 : 3,
-    maxHp: isBig ? 5 : 3,
-    type: isBig ? 'big' : 'small',
-    speed: isBig ? 1.0 : 1.8,
-    size: isBig ? 22 : 14,
+    x: isl.x + Math.cos(angle) * isl.rx * r,
+    y: isl.y + Math.sin(angle) * isl.ry * r,
+    hp: isBoss ? 6 : 3,
+    maxHp: isBoss ? 6 : 3,
+    type: isBoss ? 'boss' : 'normal',
+    speed: isBoss ? 0.8 : 1.4,
+    size: isBoss ? 28 : 16,
+    island: isl.id,
+    patrolAngle: Math.random() * Math.PI * 2,
+    patrolCenterX: isl.x + Math.cos(angle) * isl.rx * r * 0.5,
+    patrolCenterY: isl.y + Math.sin(angle) * isl.ry * r * 0.5,
+    patrolRadius: 40 + Math.random() * 60,
+    chasing: false,
     flashUntil: 0
   };
 }
 
-function findNearestPlayer(ex, ey) {
+function findNearestPlayer(ex, ey, range) {
   let best = null;
-  let bestDist = Infinity;
+  let bestDist = range || Infinity;
   for (const sid in players) {
     const p = players[sid];
     if (p.health <= 0) continue;
@@ -226,7 +361,9 @@ function findNearestPlayer(ex, ey) {
   return best;
 }
 
-// --------------- Game Tick ---------------
+// ===============================================================
+//  GAME TICK
+// ===============================================================
 const TICK_RATE = 60;
 const TICK_MS = 1000 / TICK_RATE;
 let lastSpawn = Date.now();
@@ -240,49 +377,60 @@ function gameTick() {
     lastSpawn = now;
   }
 
-  // Move enemies toward nearest player
+  // Move enemies
   for (const eid in enemies) {
     const e = enemies[eid];
-    const target = findNearestPlayer(e.x, e.y);
-    if (!target) continue;
+    const nearPlayer = findNearestPlayer(e.x, e.y, 200);
 
-    const dx = target.x - e.x;
-    const dy = target.y - e.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist < 1) continue;
-
-    const speed = e.speed;
-    e.x += (dx / dist) * speed;
-    e.y += (dy / dist) * speed;
-
-    // Clamp to map
-    e.x = Math.max(0, Math.min(MAP_W, e.x));
-    e.y = Math.max(0, Math.min(MAP_H, e.y));
-
-    // Check collision with target player
-    if (dist < e.size + 16) {
-      // deal damage
-      target.health -= 10;
-      if (target.health < 0) target.health = 0;
-
-      // Notify player of damage
-      io.to(target.id).emit('damage', { health: target.health });
-
-      if (target.health <= 0) {
-        io.to(target.id).emit('dead');
+    if (nearPlayer) {
+      // Chase mode
+      e.chasing = true;
+      const dx = nearPlayer.x - e.x;
+      const dy = nearPlayer.y - e.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > 1) {
+        e.x += (dx / dist) * e.speed;
+        e.y += (dy / dist) * e.speed;
       }
 
-      // Remove enemy
-      delete enemies[eid];
+      // Collision with player - deal damage
+      if (dist < e.size + 16) {
+        nearPlayer.health -= 10;
+        if (nearPlayer.health < 0) nearPlayer.health = 0;
+        io.to(nearPlayer.id).emit('damage', { health: nearPlayer.health });
 
-      // Broadcast kill feed if player died
-      if (target.health <= 0) {
-        io.emit('killfeed', { text: target.name + ' foi derrotado!' });
+        if (nearPlayer.health <= 0) {
+          io.to(nearPlayer.id).emit('dead');
+          io.emit('killfeed', { text: nearPlayer.name + ' foi derrotado!' });
+        }
+
+        // Push enemy back
+        if (dist > 0) {
+          e.x -= (dx / dist) * 30;
+          e.y -= (dy / dist) * 30;
+        }
+      }
+    } else {
+      // Patrol mode - circle around patrol center
+      e.chasing = false;
+      e.patrolAngle += 0.01;
+      const targetX = e.patrolCenterX + Math.cos(e.patrolAngle) * e.patrolRadius;
+      const targetY = e.patrolCenterY + Math.sin(e.patrolAngle) * e.patrolRadius;
+      const dx = targetX - e.x;
+      const dy = targetY - e.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > 1) {
+        e.x += (dx / dist) * e.speed * 0.5;
+        e.y += (dy / dist) * e.speed * 0.5;
       }
     }
+
+    // Clamp to map
+    e.x = Math.max(20, Math.min(MAP_W - 20, e.x));
+    e.y = Math.max(20, Math.min(MAP_H - 20, e.y));
   }
 
-  // Move bullets and check collision with enemies
+  // Move bullets and check collision
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
     b.x += b.vx;
@@ -300,19 +448,29 @@ function gameTick() {
       const e = enemies[eid];
       const d = Math.hypot(b.x - e.x, b.y - e.y);
       if (d < e.size + 6) {
-        e.hp--;
-        e.flashUntil = now + 100;
-        if (e.hp <= 0) {
-          // Enemy killed
-          const killer = players[b.ownerId];
-          if (killer) {
-            killer.score += 10;
-            io.to(b.ownerId).emit('scoreUpdate', { score: killer.score });
-            io.emit('killfeed', { text: killer.name + ' eliminou um inimigo!' });
+        // Instead of direct damage, trigger quiz for the shooter
+        const shooter = players[b.ownerId];
+        if (shooter && !activeQuizzes[b.ownerId]) {
+          const category = getCategoryForEnemy(e);
+          const question = getRandomQuestion(category);
+          if (question) {
+            activeQuizzes[b.ownerId] = {
+              enemyId: eid,
+              questionIndex: question.index,
+              category: category,
+              correctAnswer: question.answer,
+              timestamp: now
+            };
+            io.to(b.ownerId).emit('quizStart', {
+              enemyId: eid,
+              question: question.q,
+              options: question.options,
+              timeLimit: QUIZ_TIME_LIMIT / 1000,
+              category: category
+            });
           }
-          io.emit('enemyDeath', { id: eid, x: e.x, y: e.y });
-          delete enemies[eid];
         }
+        e.flashUntil = now + 150;
         hit = true;
         break;
       }
@@ -321,26 +479,61 @@ function gameTick() {
       bullets.splice(i, 1);
     }
   }
+
+  // Check quiz timeouts
+  for (const sid in activeQuizzes) {
+    const quiz = activeQuizzes[sid];
+    if (now - quiz.timestamp > QUIZ_TIME_LIMIT) {
+      // Timeout = wrong answer
+      const player = players[sid];
+      if (player) {
+        player.health -= 15;
+        if (player.health < 0) player.health = 0;
+        const correctIdx = quiz.correctAnswer;
+        const category = quiz.category;
+        const pool = questions[category];
+        const correctText = pool && pool[quiz.questionIndex] ? pool[quiz.questionIndex].options[correctIdx] : '';
+        io.to(sid).emit('quizResult', {
+          correct: false,
+          xp: 0,
+          coins: 0,
+          damage: 15,
+          correctAnswer: correctText,
+          health: player.health
+        });
+        if (player.health <= 0) {
+          io.to(sid).emit('dead');
+          io.emit('killfeed', { text: player.name + ' foi derrotado!' });
+        }
+      }
+      delete activeQuizzes[sid];
+    }
+  }
 }
 
 setInterval(gameTick, TICK_MS);
 
-// Broadcast game state at lower frequency
+// Broadcast game state
 setInterval(() => {
   const enemyArr = Object.values(enemies).map(e => ({
-    id: e.id, x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp, type: e.type, size: e.size,
-    flash: e.flashUntil > Date.now()
+    id: e.id, x: e.x, y: e.y, hp: e.hp, maxHp: e.maxHp,
+    type: e.type, size: e.size, island: e.island,
+    chasing: e.chasing, flash: e.flashUntil > Date.now()
   }));
   const playerArr = Object.values(players).map(p => ({
-    id: p.id, name: p.name, x: p.x, y: p.y, color: p.color, score: p.score, health: p.health
+    id: p.id, name: p.name, x: p.x, y: p.y, color: p.color,
+    score: p.score, health: p.health, xp: p.xp, level: p.level,
+    coins: p.coins, direction: p.direction, isMoving: p.isMoving
   }));
   const bulletArr = bullets.map(b => ({
     id: b.id, x: b.x, y: b.y, color: b.color
   }));
   io.emit('state', { players: playerArr, enemies: enemyArr, bullets: bulletArr });
-}, 1000 / 15); // 15 fps state updates
+}, 1000 / 15);
 
-// --------------- Socket.io ---------------
+// ===============================================================
+//  SOCKET.IO
+// ===============================================================
 io.on('connection', (socket) => {
   console.log('Player connected:', socket.id);
 
@@ -354,16 +547,20 @@ io.on('connection', (socket) => {
       y: spawn.y,
       color,
       score: 0,
-      health: 100
+      health: 100,
+      xp: 0,
+      level: 1,
+      coins: 0,
+      direction: 'down',
+      isMoving: false
     };
 
-    // Send init data to the joining player
     socket.emit('init', {
       id: socket.id,
       player: players[socket.id],
       islands,
-      trees,
-      rocks,
+      bridges,
+      totems,
       mapW: MAP_W,
       mapH: MAP_H
     });
@@ -377,27 +574,169 @@ io.on('connection', (socket) => {
     if (!p || p.health <= 0) return;
     p.x = Math.max(0, Math.min(MAP_W, data.x));
     p.y = Math.max(0, Math.min(MAP_H, data.y));
+    p.direction = data.direction || p.direction;
+    p.isMoving = data.isMoving || false;
   });
 
   socket.on('shoot', (data) => {
     const p = players[socket.id];
     if (!p || p.health <= 0) return;
-    const dx = data.tx - p.x;
-    const dy = data.ty - p.y;
-    const dist = Math.hypot(dx, dy);
-    if (dist < 1) return;
-    const speed = 7;
+    if (activeQuizzes[socket.id]) return; // Can't shoot during quiz
+
+    // Direction-based shooting
+    let vx = 0, vy = 0;
+    const speed = 6;
+    switch (data.direction) {
+      case 'up': vy = -speed; break;
+      case 'down': vy = speed; break;
+      case 'left': vx = -speed; break;
+      case 'right': vx = speed; break;
+      default: vy = speed; break;
+    }
+
     bullets.push({
       id: uuidv4(),
       ownerId: socket.id,
       x: p.x,
       y: p.y,
-      vx: (dx / dist) * speed,
-      vy: (dy / dist) * speed,
+      vx,
+      vy,
       dist: 0,
-      maxDist: 800,
+      maxDist: 600,
       color: p.color
     });
+  });
+
+  socket.on('quizAnswer', (data) => {
+    const quiz = activeQuizzes[socket.id];
+    if (!quiz) return;
+    const p = players[socket.id];
+    if (!p) { delete activeQuizzes[socket.id]; return; }
+
+    const correct = data.answerIndex === quiz.correctAnswer;
+    const category = quiz.category;
+    const pool = questions[category];
+    const correctText = pool && pool[quiz.questionIndex] ? pool[quiz.questionIndex].options[quiz.correctAnswer] : '';
+
+    if (correct) {
+      // Damage the enemy
+      const enemy = enemies[quiz.enemyId];
+      if (enemy) {
+        enemy.hp--;
+        if (enemy.hp <= 0) {
+          const xpGain = enemy.type === 'boss' ? 30 : 15;
+          const coinGain = enemy.type === 'boss' ? 15 : 5;
+          p.xp += xpGain;
+          p.coins += coinGain;
+          p.score += xpGain;
+          const newLevel = Math.floor(p.xp / 100) + 1;
+          if (newLevel > p.level) {
+            p.level = newLevel;
+            p.health = 100; // Full heal on level up
+            io.emit('levelUp', { level: p.level, name: p.name });
+            io.emit('killfeed', { text: p.name + ' subiu para nivel ' + p.level + '!' });
+          }
+          io.emit('enemyDeath', { id: quiz.enemyId, x: enemy.x, y: enemy.y, island: enemy.island });
+          delete enemies[quiz.enemyId];
+          io.to(socket.id).emit('quizResult', {
+            correct: true, xp: xpGain, coins: coinGain, damage: 0,
+            correctAnswer: correctText, health: p.health, killed: true
+          });
+        } else {
+          p.xp += 15;
+          p.coins += 5;
+          p.score += 15;
+          const newLevel = Math.floor(p.xp / 100) + 1;
+          if (newLevel > p.level) {
+            p.level = newLevel;
+            p.health = 100;
+            io.emit('levelUp', { level: p.level, name: p.name });
+            io.emit('killfeed', { text: p.name + ' subiu para nivel ' + p.level + '!' });
+          }
+          io.to(socket.id).emit('quizResult', {
+            correct: true, xp: 15, coins: 5, damage: 0,
+            correctAnswer: correctText, health: p.health, killed: false
+          });
+        }
+      } else {
+        // Enemy already dead
+        p.xp += 15;
+        p.coins += 5;
+        p.score += 15;
+        const newLevel = Math.floor(p.xp / 100) + 1;
+        if (newLevel > p.level) {
+          p.level = newLevel;
+          p.health = 100;
+          io.emit('levelUp', { level: p.level, name: p.name });
+        }
+        io.to(socket.id).emit('quizResult', {
+          correct: true, xp: 15, coins: 5, damage: 0,
+          correctAnswer: correctText, health: p.health, killed: false
+        });
+      }
+    } else {
+      // Wrong answer
+      p.health -= 15;
+      if (p.health < 0) p.health = 0;
+      io.to(socket.id).emit('quizResult', {
+        correct: false, xp: 0, coins: 0, damage: 15,
+        correctAnswer: correctText, health: p.health, killed: false
+      });
+      if (p.health <= 0) {
+        io.to(socket.id).emit('dead');
+        io.emit('killfeed', { text: p.name + ' foi derrotado!' });
+      }
+    }
+
+    delete activeQuizzes[socket.id];
+  });
+
+  socket.on('totemInteract', (data) => {
+    const p = players[socket.id];
+    if (!p || p.health <= 0) return;
+    if (activeQuizzes[socket.id]) return;
+
+    const totem = totems.find(t => t.id === data.totemId);
+    if (!totem) return;
+
+    // Check distance
+    const dist = Math.hypot(p.x - totem.x, p.y - totem.y);
+    if (dist > 80) return;
+
+    const question = getRandomQuestion(totem.category);
+    if (!question) return;
+
+    activeQuizzes[socket.id] = {
+      enemyId: null,
+      totemId: totem.id,
+      questionIndex: question.index,
+      category: totem.category,
+      correctAnswer: question.answer,
+      timestamp: Date.now()
+    };
+
+    io.to(socket.id).emit('quizStart', {
+      enemyId: null,
+      totemId: totem.id,
+      question: question.q,
+      options: question.options,
+      timeLimit: QUIZ_TIME_LIMIT / 1000,
+      category: totem.category
+    });
+  });
+
+  socket.on('chat', (data) => {
+    const p = players[socket.id];
+    if (!p) return;
+    const text = (data.text || '').substring(0, 100);
+    if (!text) return;
+    io.emit('chat', { name: p.name, text, color: p.color });
+  });
+
+  socket.on('emote', (data) => {
+    const p = players[socket.id];
+    if (!p) return;
+    io.emit('emote', { playerId: socket.id, type: data.type });
   });
 
   socket.on('respawn', () => {
@@ -407,7 +746,10 @@ io.on('connection', (socket) => {
     p.x = spawn.x;
     p.y = spawn.y;
     p.health = 100;
-    p.score = Math.max(0, p.score - 10);
+    // Lose some XP on death
+    p.xp = Math.max(0, p.xp - 20);
+    p.level = Math.floor(p.xp / 100) + 1;
+    delete activeQuizzes[socket.id];
     socket.emit('respawned', { player: p });
   });
 
@@ -417,6 +759,7 @@ io.on('connection', (socket) => {
       io.emit('killfeed', { text: p.name + ' saiu do jogo.' });
     }
     delete players[socket.id];
+    delete activeQuizzes[socket.id];
     io.emit('playerCount', { count: Object.keys(players).length });
     console.log('Player disconnected:', socket.id);
   });
