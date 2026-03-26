@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Knowlands - Login</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <main class="page">
+    <video class="bg-video" autoplay muted loop playsinline>
+      <source src="bg.mp4" type="video/mp4" />
+    </video>
+
+    <div class="overlay" aria-hidden="true"></div>
+
+    <section class="auth" aria-label="Tela de login">
+      <div class="auth__top">
+        <div class="brand">
+          <img src="logo.png" class="brand__logo" alt="Logo">
+          <div>
+            <div class="brand__name">Knowlands</div>
+            <div class="brand__sub">Multiplayer Island Game</div>
+          </div>
+        </div>
+
+        <h1>Faca login</h1>
+        <p>Entre com seu e-mail para jogar. Voce tambem pode criar uma conta.</p>
+      </div>
+
+      <div class="auth__body">
+        <div id="loginError" class="msg msg--error" style="display:none;"></div>
+        <div id="loginSuccess" class="msg msg--success" style="display:none;"></div>
+
+        <!-- Google Sign-In Button -->
+        <div id="googleBtnContainer" style="display:none;">
+          <div id="g_id_onload"
+            data-client_id=""
+            data-callback="handleGoogleLogin"
+            data-auto_prompt="false">
+          </div>
+          <button class="btn btn--google" type="button" id="googleSignInBtn">
+            <svg class="gicon" viewBox="0 0 48 48" aria-hidden="true">
+              <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 33.1 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 6 .1 8.2 2.9l5.7-5.7C34.5 6.2 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.1-.1-2.3-.4-3.5z"/>
+              <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.3 19 12 24 12c3.1 0 6 .1 8.2 2.9l5.7-5.7C34.5 6.2 29.5 4 24 4 16.3 4 9.6 8.3 6.3 14.7z"/>
+              <path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.2C29.3 36 27 36.9 24 36c-5.3 0-9.8-3.6-11.4-8.5l-6.5 5C9.4 39.6 16.1 44 24 44z"/>
+              <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.2 3-3.6 5.4-6.6 6.6l.1.1 6.3 5.2C38.6 36.6 44 31.3 44 24c0-1.1-.1-2.3-.4-3.5z"/>
+            </svg>
+            Continuar com Google
+          </button>
+        </div>
+
+        <div class="divider" id="googleDivider" style="display:none;">ou</div>
+
+        <form id="loginForm">
+          <div class="field">
+            <div>
+              <label for="email">E-mail</label>
+              <input
+                class="input"
+                id="email"
+                name="email"
+                type="email"
+                placeholder="seuemail@exemplo.com"
+                autocomplete="email"
+                required
+              />
+            </div>
+
+            <div>
+              <label for="password">Senha</label>
+              <input
+                class="input"
+                id="password"
+                name="password"
+                type="password"
+                placeholder="********"
+                autocomplete="current-password"
+                required
+              />
+            </div>
+
+            <button class="btn btn--primary" type="submit">Entrar</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="auth__footer">
+        <span>Nao tem conta?</span>
+        <a href="#" id="signupLink">Criar conta</a>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL DE CADASTRO -->
+  <div class="modal" id="signupModal" aria-hidden="true">
+    <div class="modal__box" role="dialog" aria-modal="true" aria-labelledby="signupTitle">
+      <div class="modal__head">
+        <div>
+          <h2 class="modal__title" id="signupTitle">Criar conta</h2>
+          <p>Preencha as informacoes para se cadastrar.</p>
+        </div>
+        <button class="modal__close" type="button" data-close="signupModal" aria-label="Fechar">
+          &times;
+        </button>
+      </div>
+
+      <div id="signupError" class="msg msg--error" style="display:none;"></div>
+      <div id="signupSuccess" class="msg msg--success" style="display:none;"></div>
+
+      <form id="signupForm" class="field">
+        <div>
+          <label for="signupName">Nome</label>
+          <input
+            class="input"
+            id="signupName"
+            name="signupName"
+            type="text"
+            placeholder="Seu nome"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="signupEmail">E-mail</label>
+          <input
+            class="input"
+            id="signupEmail"
+            name="signupEmail"
+            type="email"
+            placeholder="seuemail@exemplo.com"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="signupPassword">Senha</label>
+          <input
+            class="input"
+            id="signupPassword"
+            name="signupPassword"
+            type="password"
+            placeholder="Crie uma senha"
+            required
+          />
+        </div>
+
+        <div>
+          <label for="signupConfirmPassword">Confirmar senha</label>
+          <input
+            class="input"
+            id="signupConfirmPassword"
+            name="signupConfirmPassword"
+            type="password"
+            placeholder="Repita a senha"
+            required
+          />
+        </div>
+
+        <div class="modal__actions">
+          <button class="btn btn--primary" type="submit">Cadastrar</button>
+          <button class="btn btn--secondary" type="button" data-close="signupModal">Cancelar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

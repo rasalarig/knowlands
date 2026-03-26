@@ -1,0 +1,16 @@
+{
+  "name": "knowlands",
+  "version": "1.0.0",
+  "description": "Knowlands - Multiplayer Island Game",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.18.2",
+    "google-auth-library": "^10.6.2",
+    "socket.io": "^4.7.4",
+    "uuid": "^9.0.0"
+  }
+}

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Knowlands - Jogo</title>
+  <link rel="stylesheet" href="game.css" />
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- HUD -->
+  <div id="hud-top-left" class="hud-panel">
+    <div id="playerName" class="hud-name">Jogador</div>
+    <div id="playerScore" class="hud-score">Pontos: 0</div>
+  </div>
+
+  <div id="hud-top-right" class="hud-panel">
+    <div id="playerCount">Online: 1</div>
+    <div id="killFeed" class="kill-feed"></div>
+  </div>
+
+  <div id="hud-health">
+    <div id="healthBarBg" class="health-bar-bg">
+      <div id="healthBarFill" class="health-bar-fill"></div>
+    </div>
+    <div id="healthText" class="health-text">100 / 100</div>
+  </div>
+
+  <!-- Game Over Overlay -->
+  <div id="gameOverOverlay" class="game-over-overlay" style="display:none;">
+    <div class="game-over-box">
+      <h2>Voce foi derrotado!</h2>
+      <p id="gameOverScore">Pontuacao: 0</p>
+      <button id="respawnBtn" class="respawn-btn">Renascer</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
