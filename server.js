@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const { OAuth2Client } = require('google-auth-library');
 
 const app = express();
 const server = http.createServer(app);
@@ -55,6 +56,44 @@ app.post('/api/login', async (req, res) => {
     console.error(err);
     return res.status(500).json({ error: 'Erro interno.' });
   }
+});
+
+// --------------- Google OAuth2 ---------------
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const { credential } = req.body;
+    if (!credential) {
+      return res.status(400).json({ error: 'Token nao fornecido.' });
+    }
+
+    const client = new OAuth2Client(GOOGLE_CLIENT_ID);
+    const ticket = await client.verifyIdToken({
+      idToken: credential,
+      audience: GOOGLE_CLIENT_ID
+    });
+    const payload = ticket.getPayload();
+
+    const email = payload.email;
+    const name = payload.name || payload.email.split('@')[0];
+    const picture = payload.picture || '';
+
+    // Auto-create user if first time
+    if (!users.has(email)) {
+      users.set(email, { name, email, hash: null, googleUser: true, picture });
+    }
+
+    const user = users.get(email);
+    return res.json({ ok: true, user: { name: user.name, email: user.email, picture: user.picture || '' } });
+  } catch (err) {
+    console.error('Google auth error:', err.message);
+    return res.status(401).json({ error: 'Token do Google invalido.' });
+  }
+});
+
+app.get('/api/auth/google-client-id', (req, res) => {
+  res.json({ clientId: GOOGLE_CLIENT_ID });
 });
 
 // --------------- Game State ---------------

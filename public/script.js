@@ -1,3 +1,89 @@
+/* ---- Google OAuth2 ---- */
+let googleClientId = '';
+
+async function initGoogleAuth() {
+  try {
+    const res = await fetch('/api/auth/google-client-id');
+    const data = await res.json();
+    googleClientId = data.clientId;
+
+    if (googleClientId) {
+      // Initialize Google Identity Services
+      google.accounts.id.initialize({
+        client_id: googleClientId,
+        callback: handleGoogleLogin,
+        auto_select: false
+      });
+
+      // Setup the custom button click
+      const btn = document.getElementById('googleSignInBtn');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          google.accounts.id.prompt((notification) => {
+            if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+              // Fallback: use popup mode
+              google.accounts.id.prompt();
+            }
+          });
+        });
+      }
+    } else {
+      // No client ID configured - hide Google button
+      const container = document.getElementById('googleBtnContainer');
+      if (container) container.style.display = 'none';
+      const divider = document.querySelector('.divider');
+      if (divider) divider.style.display = 'none';
+    }
+  } catch (err) {
+    console.warn('Google Auth not available:', err);
+    const container = document.getElementById('googleBtnContainer');
+    if (container) container.style.display = 'none';
+    const divider = document.querySelector('.divider');
+    if (divider) divider.style.display = 'none';
+  }
+}
+
+// Handle Google login callback
+async function handleGoogleLogin(response) {
+  hideMsg('loginError');
+  hideMsg('loginSuccess');
+
+  try {
+    const res = await fetch('/api/auth/google', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: response.credential })
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      showMsg('loginError', data.error || 'Erro ao fazer login com Google.');
+      return;
+    }
+
+    sessionStorage.setItem('username', data.user.name);
+    sessionStorage.setItem('email', data.user.email);
+    if (data.user.picture) sessionStorage.setItem('picture', data.user.picture);
+
+    showMsg('loginSuccess', 'Login com Google bem-sucedido! Entrando...');
+    setTimeout(() => { window.location.href = '/game.html'; }, 600);
+  } catch (err) {
+    showMsg('loginError', 'Erro de conexao. Tente novamente.');
+  }
+}
+
+// Make handleGoogleLogin global for GSI callback
+window.handleGoogleLogin = handleGoogleLogin;
+
+// Initialize when GSI script loads
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(initGoogleAuth, 500);
+  });
+} else {
+  setTimeout(initGoogleAuth, 500);
+}
+
 /* ---- Knowlands Login / Signup ---- */
 
 const signupLink = document.getElementById('signupLink');
