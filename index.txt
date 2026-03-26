@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Login</title>
+  <style>
+    :root{
+      --card-bg: rgba(255,255,255,.88);
+      --card-border: rgba(255,255,255,.55);
+      --text: #101828;
+      --muted: #667085;
+      --shadow: 0 20px 60px rgba(16,24,40,.22);
+      --radius: 18px;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --danger: #d92d20;
+      --field: rgba(16,24,40,.06);
+      --field-border: rgba(16,24,40,.12);
+    }
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color: var(--text);
+      min-height:100vh;
+      overflow:hidden; /* evita barra por causa do vídeo */
+    }
+
+    /* CONTAINER de tela cheia */
+    .page{
+      min-height:100vh;
+      display:grid;
+      place-items:center;
+      padding: 28px 16px;
+      position:relative;
+      isolation:isolate; /* garante camadas */
+    }
+
+    /* VÍDEO NO FUNDO */
+    .bg-video{
+      position:absolute;
+      inset:0;
+      width:100%;
+      height:100%;
+      object-fit:cover;   /* “corta” para preencher sem distorcer */
+      z-index:-2;
+    }
+
+    /* escurece para legibilidade */
+    .overlay{
+      position:absolute;
+      inset:0;
+      background: linear-gradient(180deg, rgba(0,0,0,.45), rgba(0,0,0,.35));
+      z-index:-1;
+    }
+
+    .auth{
+      width: min(420px, 100%);
+      border-radius: var(--radius);
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      overflow:hidden;
+    }
+
+    .auth__top{ padding: 22px 22px 12px; }
+
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      margin-bottom:10px;
+    }
+
+    .brand__logo{
+      width:38px; height:38px;
+      border-radius: 12px;
+      background: rgba(37,99,235,.12);
+      display:grid;
+      place-items:center;
+      font-weight:700;
+      color: var(--accent);
+      user-select:none;
+    }
+
+    h1{
+      font-size: 20px;
+      margin: 6px 0 4px;
+      letter-spacing:-0.2px;
+    }
+    p{
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height:1.35;
+    }
+
+    .auth__body{
+      padding: 14px 22px 20px;
+      display:grid;
+      gap: 14px;
+    }
+
+    .btn{
+      width:100%;
+      border:0;
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-weight: 600;
+      cursor:pointer;
+      transition: transform .05s ease, background .15s ease, box-shadow .15s ease, border-color .15s ease;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:10px;
+      user-select:none;
+    }
+    .btn:active{ transform: translateY(1px); }
+
+    .btn--google{
+      background: white;
+      border: 1px solid rgba(16,24,40,.14);
+      box-shadow: 0 1px 0 rgba(16,24,40,.04);
+    }
+
+    .btn--primary{
+      background: var(--accent);
+      color: white;
+      box-shadow: 0 8px 18px rgba(37,99,235,.28);
+    }
+    .btn--primary:hover{ background: var(--accent-hover); }
+
+    .divider{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .divider::before, .divider::after{
+      content:"";
+      height:1px;
+      background: rgba(16,24,40,.12);
+      flex:1;
+    }
+
+    label{
+      font-size: 13px;
+      font-weight: 600;
+      color: #344054;
+      display:block;
+      margin-bottom: 6px;
+    }
+
+    .field{ display:grid; gap: 10px; }
+
+    .input{
+      width:100%;
+      padding: 12px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--field-border);
+      background: var(--field);
+      outline:none;
+      font-size: 14px;
+      transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    }
+    .input:focus{
+      background: rgba(255,255,255,.85);
+      border-color: rgba(37,99,235,.55);
+      box-shadow: 0 0 0 4px rgba(37,99,235,.15);
+    }
+
+    .row{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .checkbox{
+      display:flex;
+      align-items:center;
+      gap: 8px;
+      cursor:pointer;
+      user-select:none;
+    }
+    .checkbox input{
+      width:16px; height:16px;
+      accent-color: var(--accent);
+    }
+
+    a{
+      color: var(--accent);
+      text-decoration:none;
+      font-weight:600;
+    }
+    a:hover{ text-decoration:underline; }
+
+    .auth__footer{
+      padding: 14px 22px 18px;
+      background: rgba(16,24,40,.03);
+      border-top: 1px solid rgba(16,24,40,.08);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap: 10px;
+      flex-wrap:wrap;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .link-danger{ color: var(--danger); }
+
+    .gicon{ width:18px; height:18px; display:block; }
+
+    @media (max-width:380px){
+      .auth__top, .auth__body, .auth__footer{ padding-left:16px; padding-right:16px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <!-- vídeo de fundo -->
+    <video class="bg-video" autoplay muted loop playsinline>
+      <source src="bg.mp4" type="video/mp4">
+      Seu navegador não suporta vídeo em HTML5.
+    </video>
+
+    <!-- camada escura por cima do vídeo (melhora leitura do card) -->
+    <div class="overlay" aria-hidden="true"></div>
+
+    <!-- card de login -->
+    <section class="auth" aria-label="Tela de login">
+      <div class="auth__top">
+        <div class="brand">
+          <div class="brand__logo">A</div>
+          <div>
+            <div style="font-weight:800;letter-spacing:-.2px;">Sua Marca</div>
+            <div style="font-size:12px;color:var(--muted);">Acesse sua conta</div>
+          </div>
+        </div>
+
+        <h1>Faça login</h1>
+        <p>Entre com Google ou use seu e-mail. Você também pode criar uma conta.</p>
+      </div>
+
+      <div class="auth__body">
+        <button class="btn btn--google" type="button" onclick="alert('Conectar OAuth do Google aqui')">
+          <svg class="gicon" viewBox="0 0 48 48" aria-hidden="true">
+            <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 33.1 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 6 .1 8.2 2.9l5.7-5.7C34.5 6.2 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.1-.1-2.3-.4-3.5z"/>
+            <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.3 19 12 24 12c3.1 0 6 .1 8.2 2.9l5.7-5.7C34.5 6.2 29.5 4 24 4 16.3 4 9.6 8.3 6.3 14.7z"/>
+            <path fill="#4CAF50" d="M24 44c5.2 0 10-2 13.6-5.2l-6.3-5.2C29.3 36 27 36.9 24 36c-5.3 0-9.8-3.6-11.4-8.5l-6.5 5C9.4 39.6 16.1 44 24 44z"/>
+            <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-1.2 3-3.6 5.4-6.6 6.6l.1.1 6.3 5.2C38.6 36.6 44 31.3 44 24c0-1.1-.1-2.3-.4-3.5z"/>
+          </svg>
+          Continuar com Google
+        </button>
+
+        <div class="divider">ou</div>
+
+        <form onsubmit="event.preventDefault(); alert('Enviar login por e-mail aqui');">
+          <div class="field">
+            <div>
+              <label for="email">E-mail</label>
+              <input class="input" id="email" name="email" type="email" placeholder="seuemail@exemplo.com" autocomplete="email" required />
+            </div>
+
+            <div>
+              <label for="password">Senha</label>
+              <input class="input" id="password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" required />
+            </div>
+
+            <div class="row">
+              <label class="checkbox">
+                <input type="checkbox" name="remember" />
+                Lembrar de mim
+              </label>
+              <a href="#forgot" class="link-danger" onclick="alert('Fluxo de recuperação aqui')">Esqueceu a conta?</a>
+            </div>
+
+            <button class="btn btn--primary" type="submit">Entrar com e-mail</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="auth__footer">
+        <span>Não tem conta?</span>
+        <a href="#signup" onclick="alert('Abrir cadastro aqui')">Criar conta</a>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
