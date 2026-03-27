@@ -82,6 +82,17 @@
   const elChatMessages = document.getElementById('chatMessages');
   const elChatInput = document.getElementById('chatInput');
 
+  // Duel DOM refs
+  const elDuelPrompt = document.getElementById('duelPrompt');
+  const elDuelPromptText = document.getElementById('duelPromptText');
+  const elDuelRequestModal = document.getElementById('duelRequestModal');
+  const elDuelChallengerName = document.getElementById('duelChallengerName');
+  const elDuelAcceptBtn = document.getElementById('duelAcceptBtn');
+  const elDuelDeclineBtn = document.getElementById('duelDeclineBtn');
+  const elDuelResultModal = document.getElementById('duelResultModal');
+  const elDuelResultContent = document.getElementById('duelResultContent');
+  const touchDuelBtn = document.getElementById('touchDuelBtn');
+
   elName.textContent = username;
 
   // ---- Canvas resize ----
@@ -135,6 +146,12 @@
   let quizTimeLeft = 10;
   let quizEnemyId = null;
 
+  // Duel state
+  let duelActive = false;
+  let currentDuelId = null;
+  let nearbyPlayerId = null;
+  let pendingDuelId = null;
+
   // Ranking panel
   let rankingOpen = false;
 
@@ -185,6 +202,11 @@
       e.preventDefault();
       toggleRanking();
     }
+    if (e.key === 'f' || e.key === 'F') {
+      if (nearbyPlayerId && !quizActive && !duelActive) {
+        socket.emit('duelChallenge', { targetId: nearbyPlayerId });
+      }
+    }
     if (e.key === 'Escape') {
       if (quizActive) return;
       if (chatOpen) closeChatInput();
@@ -201,6 +223,12 @@
     btn.addEventListener('click', () => {
       if (!quizActive) return;
       const idx = parseInt(btn.dataset.index);
+      // If in a duel, send duelAnswer instead
+      if (duelActive && currentDuelId) {
+        socket.emit('duelAnswer', { duelId: currentDuelId, answerIndex: idx });
+        // Don't close modal yet - wait for duelResult
+        return;
+      }
       socket.emit('quizAnswer', { answerIndex: idx, enemyId: quizEnemyId });
       closeQuiz();
     });
@@ -485,6 +513,121 @@
     const isl = islands.find(i => i.id === data.island);
     const cat = isl ? isl.category : null;
     spawnDeathParticles(data.x, data.y, cat);
+  });
+
+  // ---- Duel Socket Events ----
+  socket.on('duelSent', (data) => {
+    addKillFeed('Desafio enviado para ' + data.targetName + '!');
+  });
+
+  socket.on('duelRequest', (data) => {
+    pendingDuelId = data.duelId;
+    elDuelChallengerName.textContent = data.challengerName;
+    elDuelRequestModal.style.display = 'flex';
+  });
+
+  socket.on('duelDeclined', (data) => {
+    addKillFeed(data.targetName + ' recusou o duelo.');
+  });
+
+  socket.on('duelStart', (data) => {
+    // Close request modal if open
+    elDuelRequestModal.style.display = 'none';
+    if (elDuelPrompt) elDuelPrompt.style.display = 'none';
+
+    // Reuse the quiz modal for the duel question
+    duelActive = true;
+    currentDuelId = data.duelId;
+    quizActive = true; // Prevent movement/shooting during duel
+
+    const catName = categoryInfo[data.category] ? categoryInfo[data.category].name : data.category;
+    elQuizCategory.textContent = '\u2694 DUELO - ' + catName;
+    elQuizQuestion.textContent = data.question;
+    elOptA.textContent = data.options[0];
+    elOptB.textContent = data.options[1];
+    elOptC.textContent = data.options[2];
+    elOptD.textContent = data.options[3];
+
+    // Reset timer circle
+    elTimerCircle.style.strokeDashoffset = '0';
+    elTimerCircle.style.stroke = '#ffd700';
+    elTimerText.style.color = '#ffd700';
+    elTimerText.textContent = data.timeLimit;
+
+    elQuizModal.style.display = 'flex';
+
+    // Start timer
+    quizTimeLeft = data.timeLimit;
+    const totalTime = data.timeLimit;
+    const circumference = 113;
+    clearInterval(quizTimerInterval);
+    quizTimerInterval = setInterval(() => {
+      quizTimeLeft--;
+      elTimerText.textContent = Math.max(0, quizTimeLeft);
+      const progress = 1 - (quizTimeLeft / totalTime);
+      elTimerCircle.style.strokeDashoffset = (circumference * progress).toString();
+      if (quizTimeLeft <= 5) {
+        elTimerCircle.style.stroke = '#ff1744';
+        elTimerText.style.color = '#ff1744';
+      }
+      if (quizTimeLeft <= 0) clearInterval(quizTimerInterval);
+    }, 1000);
+  });
+
+  socket.on('duelResult', (data) => {
+    duelActive = false;
+    currentDuelId = null;
+    quizActive = false;
+    elQuizModal.style.display = 'none';
+    elTimerText.style.color = '#00e5ff';
+    clearInterval(quizTimerInterval);
+    quizTimerInterval = null;
+
+    let html = '';
+    if (data.draw) {
+      html = '<div class="duel-result-content duel-result-draw">' +
+        '<div style="font-size:32px;margin-bottom:8px;">&#9876;</div>' +
+        '<div style="font-size:20px;font-weight:800;margin-bottom:6px;">EMPATE!</div>' +
+        '<div style="font-size:14px;opacity:0.8;">Ambos erraram \u2022 -5 HP</div>' +
+        '<div style="font-size:13px;opacity:0.6;margin-top:6px;">Resposta: ' + data.correctAnswer + '</div></div>';
+    } else if (data.won) {
+      html = '<div class="duel-result-content duel-result-win">' +
+        '<div style="font-size:32px;margin-bottom:8px;">&#127942;</div>' +
+        '<div style="font-size:20px;font-weight:800;margin-bottom:6px;">VITORIA!</div>' +
+        '<div style="font-size:14px;">+' + data.xp + ' XP \u2022 +' + data.coins + ' moedas</div>' +
+        '<div style="font-size:13px;opacity:0.7;margin-top:6px;">vs ' + data.opponentName + '</div></div>';
+    } else {
+      html = '<div class="duel-result-content duel-result-lose">' +
+        '<div style="font-size:32px;margin-bottom:8px;">&#128128;</div>' +
+        '<div style="font-size:20px;font-weight:800;margin-bottom:6px;">DERROTA!</div>' +
+        '<div style="font-size:14px;">-' + data.damage + ' HP</div>' +
+        '<div style="font-size:13px;opacity:0.7;margin-top:6px;">Resposta: ' + data.correctAnswer + '</div></div>';
+    }
+
+    elDuelResultModal.innerHTML = html;
+    elDuelResultModal.style.display = 'block';
+    setTimeout(() => { elDuelResultModal.style.display = 'none'; }, 3000);
+
+    // Update local health
+    if (localPlayer && data.health !== undefined) {
+      localPlayer.health = data.health;
+    }
+  });
+
+  // ---- Duel Accept/Decline Buttons ----
+  elDuelAcceptBtn.addEventListener('click', () => {
+    if (pendingDuelId) {
+      socket.emit('duelAccept', { duelId: pendingDuelId });
+      elDuelRequestModal.style.display = 'none';
+    }
+  });
+
+  elDuelDeclineBtn.addEventListener('click', () => {
+    if (pendingDuelId) {
+      socket.emit('duelDecline', { duelId: pendingDuelId });
+      elDuelRequestModal.style.display = 'none';
+      pendingDuelId = null;
+    }
   });
 
   // ---- Respawn ----
@@ -2109,6 +2252,31 @@
     updateCamera();
     updateHUD();
 
+    // Check nearby players for duel
+    nearbyPlayerId = null;
+    if (!quizActive && !duelActive && !isDead && localPlayer) {
+      for (const rp of allPlayersData) {
+        if (rp.id === myId) continue;
+        const dist = Math.hypot(rp.x - localPlayer.x, rp.y - localPlayer.y);
+        if (dist < 120) {
+          nearbyPlayerId = rp.id;
+          break;
+        }
+      }
+    }
+
+    if (nearbyPlayerId && !quizActive && !duelActive) {
+      if (elDuelPrompt) elDuelPrompt.style.display = 'block';
+      if (elDuelPromptText) {
+        const nearPlayer = allPlayersData.find(p => p.id === nearbyPlayerId);
+        elDuelPromptText.textContent = 'Pressione F para desafiar ' + (nearPlayer ? nearPlayer.name : 'Jogador');
+      }
+      if (touchDuelBtn) touchDuelBtn.style.display = 'flex';
+    } else {
+      if (elDuelPrompt) elDuelPrompt.style.display = 'none';
+      if (touchDuelBtn) touchDuelBtn.style.display = 'none';
+    }
+
     // Render
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -2172,6 +2340,15 @@
       touchFireBtn.addEventListener('touchstart', (e) => {
         e.preventDefault();
         handleShoot();
+      }, { passive: false });
+    }
+
+    if (touchDuelBtn) {
+      touchDuelBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (nearbyPlayerId && !quizActive && !duelActive) {
+          socket.emit('duelChallenge', { targetId: nearbyPlayerId });
+        }
       }, { passive: false });
     }
   }

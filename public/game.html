@@ -75,6 +75,28 @@
     <div id="feedbackContent" class="feedback-content"></div>
   </div>
 
+  <!-- Duel Challenge Prompt (appears when near another player) -->
+  <div id="duelPrompt" class="duel-prompt" style="display:none;">
+    <span id="duelPromptText">Pressione F para desafiar</span>
+  </div>
+
+  <!-- Duel Incoming Request -->
+  <div id="duelRequestModal" class="duel-request-modal" style="display:none;">
+    <div class="duel-request-box">
+      <div class="duel-request-icon">&#9876;</div>
+      <p><strong id="duelChallengerName">Jogador</strong> te desafiou para um duelo!</p>
+      <div class="duel-request-actions">
+        <button id="duelAcceptBtn" class="btn-duel-accept">Aceitar</button>
+        <button id="duelDeclineBtn" class="btn-duel-decline">Recusar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Duel Result -->
+  <div id="duelResultModal" class="duel-result-modal" style="display:none;">
+    <div id="duelResultContent" class="duel-result-content"></div>
+  </div>
+
   <!-- Level Up Celebration -->
   <div id="levelUpOverlay" class="levelup-overlay" style="display:none;">
     <div class="levelup-content">
@@ -98,7 +120,7 @@
 
   <!-- Controls Hint -->
   <div id="controlsHint" class="controls-hint">
-    WASD: Mover &nbsp;|&nbsp; ESPACO: Atacar &nbsp;|&nbsp; E: Interagir &nbsp;|&nbsp; T: Chat &nbsp;|&nbsp; Tab: Ranking
+    WASD: Mover &nbsp;|&nbsp; ESPACO: Atacar &nbsp;|&nbsp; E: Interagir &nbsp;|&nbsp; F: Desafiar &nbsp;|&nbsp; T: Chat &nbsp;|&nbsp; Tab: Ranking
   </div>
 
   <!-- Game Over Overlay -->
@@ -122,6 +144,7 @@
       <button class="dpad-btn dpad-down" data-dir="down">&#9660;</button>
     </div>
     <button class="touch-fire-btn" id="touchFireBtn">&#9876;</button>
+    <button class="touch-duel-btn" id="touchDuelBtn" style="display:none;">&#9876;</button>
   </div>
 </body>
 </html>

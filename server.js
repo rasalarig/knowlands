@@ -286,6 +286,11 @@ const enemies = {};   // id -> enemy data
 const bullets = [];   // { id, ownerId, x, y, vx, vy, dist, maxDist, color }
 const activeQuizzes = {}; // socketId -> { enemyId, questionIndex, category, timestamp, totemId }
 
+const activeDuels = {}; // duelId -> { challengerId, targetId, question, category, startTime, answers: {} }
+const pendingDuels = {}; // targetSocketId -> { challengerId, challengerName, duelId, timestamp }
+let duelIdCounter = 0;
+const DUEL_TIME_LIMIT = 30000; // 30 seconds
+
 let enemyIdCounter = 0;
 const MAX_ENEMIES = 12;
 const ENEMY_SPAWN_INTERVAL = 8000;
@@ -449,6 +454,104 @@ function findNearestPlayer(ex, ey, range) {
 }
 
 // ===============================================================
+//  DUEL RESOLUTION
+// ===============================================================
+function resolveDuel(duelId) {
+  const duel = activeDuels[duelId];
+  if (!duel) return;
+
+  const cAnswer = duel.answers[duel.challengerId];
+  const tAnswer = duel.answers[duel.targetId];
+  const challenger = players[duel.challengerId];
+  const target = players[duel.targetId];
+
+  const correctText = duel.question.options[duel.correctAnswer];
+
+  let winnerId = null;
+  let loserId = null;
+
+  if (cAnswer.correct && !tAnswer.correct) {
+    winnerId = duel.challengerId;
+    loserId = duel.targetId;
+  } else if (!cAnswer.correct && tAnswer.correct) {
+    winnerId = duel.targetId;
+    loserId = duel.challengerId;
+  } else if (cAnswer.correct && tAnswer.correct) {
+    // Both correct - faster wins
+    winnerId = cAnswer.time <= tAnswer.time ? duel.challengerId : duel.targetId;
+    loserId = winnerId === duel.challengerId ? duel.targetId : duel.challengerId;
+  }
+  // else both wrong - no winner
+
+  const xpWin = 25;
+  const coinsWin = 10;
+  const damageLose = 10;
+
+  if (winnerId && loserId) {
+    const winner = players[winnerId];
+    const loser = players[loserId];
+    if (winner) {
+      winner.xp += xpWin;
+      winner.coins += coinsWin;
+      winner.score += xpWin;
+      const newLevel = Math.floor(winner.xp / 100) + 1;
+      if (newLevel > winner.level) {
+        winner.level = newLevel;
+        winner.health = 100;
+        io.emit('levelUp', { level: winner.level, name: winner.name });
+      }
+    }
+    if (loser) {
+      loser.health = Math.max(0, loser.health - damageLose);
+      if (loser.health <= 0) {
+        io.to(loserId).emit('dead');
+        io.emit('killfeed', { text: loser.name + ' foi derrotado no duelo!' });
+      }
+    }
+
+    io.to(winnerId).emit('duelResult', {
+      won: true, xp: xpWin, coins: coinsWin, damage: 0,
+      opponentName: players[loserId]?.name || 'Jogador',
+      correctAnswer: correctText,
+      yourTime: duel.answers[winnerId].time,
+      opponentTime: duel.answers[loserId].time,
+      health: winner ? winner.health : 0
+    });
+    io.to(loserId).emit('duelResult', {
+      won: false, xp: 0, coins: 0, damage: damageLose,
+      opponentName: players[winnerId]?.name || 'Jogador',
+      correctAnswer: correctText,
+      yourTime: duel.answers[loserId].time,
+      opponentTime: duel.answers[winnerId].time,
+      health: loser ? loser.health : 0
+    });
+
+    io.emit('killfeed', { text: (winner?.name || 'Jogador') + ' venceu um duelo contra ' + (loser?.name || 'Jogador') + '!' });
+  } else {
+    // Both wrong
+    if (challenger) { challenger.health = Math.max(0, challenger.health - 5); }
+    if (target) { target.health = Math.max(0, target.health - 5); }
+
+    [duel.challengerId, duel.targetId].forEach(sid => {
+      const opponent = sid === duel.challengerId ? target : challenger;
+      const self = sid === duel.challengerId ? challenger : target;
+      io.to(sid).emit('duelResult', {
+        won: false, draw: true, xp: 0, coins: 0, damage: 5,
+        opponentName: opponent?.name || 'Jogador',
+        correctAnswer: correctText,
+        yourTime: duel.answers[sid]?.time || 0,
+        opponentTime: duel.answers[sid === duel.challengerId ? duel.targetId : duel.challengerId]?.time || 0,
+        health: self ? self.health : 0
+      });
+    });
+
+    io.emit('killfeed', { text: 'Duelo entre ' + (challenger?.name || '?') + ' e ' + (target?.name || '?') + ' terminou em empate!' });
+  }
+
+  delete activeDuels[duelId];
+}
+
+// ===============================================================
 //  GAME TICK
 // ===============================================================
 const TICK_RATE = 60;
@@ -596,6 +699,29 @@ function gameTick() {
         }
       }
       delete activeQuizzes[sid];
+    }
+  }
+
+  // Check duel timeouts
+  for (const duelId in activeDuels) {
+    const duel = activeDuels[duelId];
+    if (Date.now() - duel.startTime > DUEL_TIME_LIMIT) {
+      // Auto-answer wrong for anyone who didn't answer
+      if (!duel.answers[duel.challengerId]) {
+        duel.answers[duel.challengerId] = { answerIndex: -1, correct: false, time: DUEL_TIME_LIMIT };
+      }
+      if (!duel.answers[duel.targetId]) {
+        duel.answers[duel.targetId] = { answerIndex: -1, correct: false, time: DUEL_TIME_LIMIT };
+      }
+      resolveDuel(duelId);
+    }
+  }
+
+  // Clean expired pending duels (15 second timeout)
+  for (const targetId in pendingDuels) {
+    if (Date.now() - pendingDuels[targetId].timestamp > 15000) {
+      io.to(pendingDuels[targetId].challengerId).emit('duelDeclined', { targetName: players[targetId]?.name || 'Jogador' });
+      delete pendingDuels[targetId];
     }
   }
 }
@@ -840,6 +966,107 @@ io.on('connection', (socket) => {
     io.emit('emote', { playerId: socket.id, type: data.type });
   });
 
+  // ---- Duel System ----
+  socket.on('duelChallenge', (data) => {
+    const challenger = players[socket.id];
+    const target = players[data.targetId];
+    if (!challenger || !target) return;
+    if (challenger.health <= 0 || target.health <= 0) return;
+    if (activeQuizzes[socket.id] || activeQuizzes[data.targetId]) return;
+    // Check if either is already in a duel
+    for (const did in activeDuels) {
+      const d = activeDuels[did];
+      if (d.challengerId === socket.id || d.targetId === socket.id) return;
+      if (d.challengerId === data.targetId || d.targetId === data.targetId) return;
+    }
+    if (pendingDuels[data.targetId]) return; // Already has pending challenge
+
+    // Check proximity
+    const dist = Math.hypot(challenger.x - target.x, challenger.y - target.y);
+    if (dist > 150) return;
+
+    const duelId = 'duel_' + (++duelIdCounter);
+    pendingDuels[data.targetId] = {
+      challengerId: socket.id,
+      challengerName: challenger.name,
+      duelId: duelId,
+      timestamp: Date.now()
+    };
+
+    // Notify target
+    io.to(data.targetId).emit('duelRequest', {
+      duelId: duelId,
+      challengerName: challenger.name,
+      challengerId: socket.id
+    });
+
+    // Notify challenger that challenge was sent
+    socket.emit('duelSent', { targetName: target.name });
+  });
+
+  socket.on('duelAccept', (data) => {
+    const pending = pendingDuels[socket.id];
+    if (!pending || pending.duelId !== data.duelId) return;
+
+    delete pendingDuels[socket.id];
+
+    const challenger = players[pending.challengerId];
+    const target = players[socket.id];
+    if (!challenger || !target) return;
+
+    // Pick a random category based on current island
+    const isl = getIslandAt(challenger.x, challenger.y);
+    const category = (isl && isl.category) ? isl.category : Object.keys(questions)[Math.floor(Math.random() * Object.keys(questions).length)];
+    const question = getRandomQuestion(category);
+    if (!question) return;
+
+    activeDuels[pending.duelId] = {
+      challengerId: pending.challengerId,
+      targetId: socket.id,
+      question: question,
+      category: category,
+      correctAnswer: question.answer,
+      startTime: Date.now(),
+      answers: {}
+    };
+
+    // Send same question to both
+    const payload = {
+      duelId: pending.duelId,
+      question: question.q,
+      options: question.options,
+      category: category,
+      timeLimit: DUEL_TIME_LIMIT / 1000
+    };
+    io.to(pending.challengerId).emit('duelStart', { ...payload, opponentName: target.name });
+    io.to(socket.id).emit('duelStart', { ...payload, opponentName: challenger.name });
+  });
+
+  socket.on('duelDecline', (data) => {
+    const pending = pendingDuels[socket.id];
+    if (!pending || pending.duelId !== data.duelId) return;
+    delete pendingDuels[socket.id];
+    io.to(pending.challengerId).emit('duelDeclined', { targetName: players[socket.id]?.name || 'Jogador' });
+  });
+
+  socket.on('duelAnswer', (data) => {
+    const duel = activeDuels[data.duelId];
+    if (!duel) return;
+    if (socket.id !== duel.challengerId && socket.id !== duel.targetId) return;
+    if (duel.answers[socket.id]) return; // Already answered
+
+    duel.answers[socket.id] = {
+      answerIndex: data.answerIndex,
+      correct: data.answerIndex === duel.correctAnswer,
+      time: Date.now() - duel.startTime
+    };
+
+    // Check if both answered
+    if (duel.answers[duel.challengerId] && duel.answers[duel.targetId]) {
+      resolveDuel(data.duelId);
+    }
+  });
+
   socket.on('respawn', () => {
     const p = players[socket.id];
     if (!p) return;
@@ -861,6 +1088,23 @@ io.on('connection', (socket) => {
     }
     delete players[socket.id];
     delete activeQuizzes[socket.id];
+
+    // Clean up duels
+    delete pendingDuels[socket.id];
+    for (const did in activeDuels) {
+      const d = activeDuels[did];
+      if (d.challengerId === socket.id || d.targetId === socket.id) {
+        const otherId = d.challengerId === socket.id ? d.targetId : d.challengerId;
+        io.to(otherId).emit('duelDeclined', { targetName: 'Jogador desconectou' });
+        delete activeDuels[did];
+      }
+    }
+    for (const tid in pendingDuels) {
+      if (pendingDuels[tid].challengerId === socket.id) {
+        delete pendingDuels[tid];
+      }
+    }
+
     io.emit('playerCount', { count: Object.keys(players).length });
     console.log('Player disconnected:', socket.id);
   });
