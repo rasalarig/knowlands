@@ -41,6 +41,7 @@
 
   <!-- HUD Top Right: Island + Online -->
   <div id="hud-top-right" class="hud-panel">
+    <button id="exitGameBtn" class="exit-btn" title="Sair do jogo">&#10005; Sair</button>
     <div id="islandIndicator" class="island-indicator">Oceano</div>
     <div id="playerCount" class="online-count">Online: 1</div>
     <div id="killFeed" class="kill-feed"></div>
@@ -111,5 +112,16 @@
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="game.js"></script>
+
+  <!-- Mobile Touch Controls -->
+  <div id="mobileControls" class="mobile-controls">
+    <div class="dpad">
+      <button class="dpad-btn dpad-up" data-dir="up">&#9650;</button>
+      <button class="dpad-btn dpad-left" data-dir="left">&#9664;</button>
+      <button class="dpad-btn dpad-right" data-dir="right">&#9654;</button>
+      <button class="dpad-btn dpad-down" data-dir="down">&#9660;</button>
+    </div>
+    <button class="touch-fire-btn" id="touchFireBtn">&#9876;</button>
+  </div>
 </body>
 </html>

@@ -583,17 +583,63 @@
     }
   }
 
+  function clientPointInPolygon(px, py, polygon) {
+    let inside = false;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x, yi = polygon[i].y;
+      const xj = polygon[j].x, yj = polygon[j].y;
+      if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
   function getIslandAt(x, y) {
     for (const isl of islands) {
-      const dx = x - isl.x;
-      const dy = y - isl.y;
-      if ((dx * dx) / (isl.rx * isl.rx) + (dy * dy) / (isl.ry * isl.ry) <= 1) return isl;
+      if (isl.points) {
+        const absPoints = isl.points.map(p => ({ x: isl.x + p.x, y: isl.y + p.y }));
+        if (clientPointInPolygon(x, y, absPoints)) return isl;
+      } else {
+        const dx = x - isl.x;
+        const dy = y - isl.y;
+        if ((dx * dx) / (isl.rx * isl.rx) + (dy * dy) / (isl.ry * isl.ry) <= 1) return isl;
+      }
     }
     return null;
   }
 
   function isOnIsland(x, y) {
     return getIslandAt(x, y) !== null;
+  }
+
+  function clientIsOnBridge(x, y) {
+    for (const br of bridgeDefs) {
+      const fromIsl = islands.find(i => i.id === br.from);
+      const toIsl = islands.find(i => i.id === br.to);
+      if (!fromIsl || !toIsl) continue;
+
+      const bdx = toIsl.x - fromIsl.x;
+      const bdy = toIsl.y - fromIsl.y;
+      const len = Math.hypot(bdx, bdy);
+      if (len === 0) continue;
+      const nx = bdx / len;
+      const ny = bdy / len;
+
+      const px = x - fromIsl.x;
+      const py = y - fromIsl.y;
+      const proj = px * nx + py * ny;
+
+      if (proj < 0 || proj > len) continue;
+
+      const perpDist = Math.abs(px * (-ny) + py * nx);
+      if (perpDist < 30) return true;
+    }
+    return false;
+  }
+
+  function clientIsOnLand(x, y) {
+    return isOnIsland(x, y) || clientIsOnBridge(x, y);
   }
 
   function lerp(a, b, t) { return a + (b - a) * t; }
@@ -627,14 +673,20 @@
       dx /= len;
       dy /= len;
 
-      const onLand = isOnIsland(localPlayer.x, localPlayer.y);
-      const speed = onLand ? 3 : 1.5;
+      const speed = 3;
 
-      localPlayer.x += dx * speed;
-      localPlayer.y += dy * speed;
+      const newX = Math.max(16, Math.min(mapW - 16, localPlayer.x + dx * speed));
+      const newY = Math.max(16, Math.min(mapH - 16, localPlayer.y + dy * speed));
 
-      localPlayer.x = Math.max(16, Math.min(mapW - 16, localPlayer.x));
-      localPlayer.y = Math.max(16, Math.min(mapH - 16, localPlayer.y));
+      if (clientIsOnLand(newX, newY)) {
+        localPlayer.x = newX;
+        localPlayer.y = newY;
+      } else if (clientIsOnLand(newX, localPlayer.y)) {
+        localPlayer.x = newX;
+      } else if (clientIsOnLand(localPlayer.x, newY)) {
+        localPlayer.y = newY;
+      }
+      // Otherwise don't move (blocked by water)
 
       walkCycle += 0.15;
     }
@@ -765,6 +817,30 @@
     }
   }
 
+  // Helper: trace a smooth organic polygon path using quadratic curves
+  function traceIslandPath(ctx, pts) {
+    ctx.beginPath();
+    const last = pts[pts.length - 1];
+    ctx.moveTo((last.x + pts[0].x) / 2, (last.y + pts[0].y) / 2);
+    for (let i = 0; i < pts.length; i++) {
+      const next = pts[(i + 1) % pts.length];
+      const midX = (pts[i].x + next.x) / 2;
+      const midY = (pts[i].y + next.y) / 2;
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, midX, midY);
+    }
+    ctx.closePath();
+  }
+
+  // Helper: scale polygon points outward from center for border rings
+  function scalePoints(pts, cx, cy, offset) {
+    return pts.map(p => {
+      const dx = p.x - cx;
+      const dy = p.y - cy;
+      const dist = Math.hypot(dx, dy) || 1;
+      return { x: p.x + (dx / dist) * offset, y: p.y + (dy / dist) * offset };
+    });
+  }
+
   function drawIslands() {
     for (const isl of islands) {
       const sx = isl.x - cam.x;
@@ -777,27 +853,52 @@
 
       ctx.save();
 
-      // Shallow water ring
-      ctx.beginPath();
-      ctx.ellipse(sx, sy, isl.rx + 35, isl.ry + 35, 0, 0, Math.PI * 2);
-      ctx.fillStyle = colors.shallow;
-      ctx.fill();
+      if (isl.points) {
+        // Convert relative points to screen coordinates
+        const pts = isl.points.map(p => ({ x: sx + p.x, y: sy + p.y }));
 
-      // Beach ring
-      ctx.beginPath();
-      ctx.ellipse(sx, sy, isl.rx + 16, isl.ry + 16, 0, 0, Math.PI * 2);
-      ctx.fillStyle = colors.beach;
-      ctx.fill();
+        // Shallow water ring (expanded outline)
+        const shallowPts = scalePoints(pts, sx, sy, 35);
+        traceIslandPath(ctx, shallowPts);
+        ctx.fillStyle = colors.shallow;
+        ctx.fill();
 
-      // Main ground
-      ctx.beginPath();
-      ctx.ellipse(sx, sy, isl.rx, isl.ry, 0, 0, Math.PI * 2);
-      const grd = ctx.createRadialGradient(sx, sy, 0, sx, sy, Math.max(isl.rx, isl.ry));
-      grd.addColorStop(0, colors.grass);
-      grd.addColorStop(0.8, colors.ground);
-      grd.addColorStop(1, colors.ground);
-      ctx.fillStyle = grd;
-      ctx.fill();
+        // Beach ring (slightly expanded)
+        const beachPts = scalePoints(pts, sx, sy, 16);
+        traceIslandPath(ctx, beachPts);
+        ctx.fillStyle = colors.beach;
+        ctx.fill();
+
+        // Main ground
+        traceIslandPath(ctx, pts);
+        const grd = ctx.createRadialGradient(sx, sy, 0, sx, sy, Math.max(isl.rx, isl.ry));
+        grd.addColorStop(0, colors.grass);
+        grd.addColorStop(0.8, colors.ground);
+        grd.addColorStop(1, colors.ground);
+        ctx.fillStyle = grd;
+        ctx.fill();
+
+      } else {
+        // Fallback: ellipse rendering
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, isl.rx + 35, isl.ry + 35, 0, 0, Math.PI * 2);
+        ctx.fillStyle = colors.shallow;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, isl.rx + 16, isl.ry + 16, 0, 0, Math.PI * 2);
+        ctx.fillStyle = colors.beach;
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, isl.rx, isl.ry, 0, 0, Math.PI * 2);
+        const grd = ctx.createRadialGradient(sx, sy, 0, sx, sy, Math.max(isl.rx, isl.ry));
+        grd.addColorStop(0, colors.grass);
+        grd.addColorStop(0.8, colors.ground);
+        grd.addColorStop(1, colors.ground);
+        ctx.fillStyle = grd;
+        ctx.fill();
+      }
 
       // Terrain texture dots
       ctx.fillStyle = 'rgba(255,255,255,0.04)';
@@ -1845,16 +1946,26 @@
     for (const isl of islands) {
       const ix = mx + (isl.x / mapW) * mmW;
       const iy = my + (isl.y / mapH) * mmH;
-      const irx = (isl.rx / mapW) * mmW;
-      const iry = (isl.ry / mapH) * mmH;
 
       const cat = isl.category;
       const color = categoryInfo[cat] ? categoryInfo[cat].color : '#ffd700';
       ctx.fillStyle = color;
       ctx.globalAlpha = 0.4;
-      ctx.beginPath();
-      ctx.ellipse(ix, iy, Math.max(irx, 3), Math.max(iry, 3), 0, 0, Math.PI * 2);
-      ctx.fill();
+
+      if (isl.points) {
+        const mmPts = isl.points.map(p => ({
+          x: ix + (p.x / mapW) * mmW,
+          y: iy + (p.y / mapH) * mmH
+        }));
+        traceIslandPath(ctx, mmPts);
+        ctx.fill();
+      } else {
+        const irx = (isl.rx / mapW) * mmW;
+        const iry = (isl.ry / mapH) * mmH;
+        ctx.beginPath();
+        ctx.ellipse(ix, iy, Math.max(irx, 3), Math.max(iry, 3), 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.globalAlpha = 1;
     }
 
@@ -2031,5 +2142,49 @@
   }
 
   requestAnimationFrame(gameLoop);
+
+  // ---- Mobile Touch Controls ----
+  const isMobile = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+  const mobileControls = document.getElementById('mobileControls');
+  const touchFireBtn = document.getElementById('touchFireBtn');
+
+  if (isMobile && mobileControls) {
+    const dpadBtns = document.querySelectorAll('.dpad-btn');
+    dpadBtns.forEach(btn => {
+      const dir = btn.dataset.dir;
+
+      btn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        keys[dir === 'up' ? 'w' : dir === 'down' ? 's' : dir === 'left' ? 'a' : 'd'] = true;
+      }, { passive: false });
+
+      btn.addEventListener('touchend', (e) => {
+        e.preventDefault();
+        keys[dir === 'up' ? 'w' : dir === 'down' ? 's' : dir === 'left' ? 'a' : 'd'] = false;
+      }, { passive: false });
+
+      btn.addEventListener('touchcancel', (e) => {
+        keys[dir === 'up' ? 'w' : dir === 'down' ? 's' : dir === 'left' ? 'a' : 'd'] = false;
+      });
+    });
+
+    if (touchFireBtn) {
+      touchFireBtn.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        handleShoot();
+      }, { passive: false });
+    }
+  }
+
+  // ---- Exit Button ----
+  const exitBtn = document.getElementById('exitGameBtn');
+  if (exitBtn) {
+    exitBtn.addEventListener('click', () => {
+      if (confirm('Sair do jogo?')) {
+        sessionStorage.clear();
+        window.location.href = '/';
+      }
+    });
+  }
 
 })();

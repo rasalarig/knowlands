@@ -183,12 +183,57 @@ function nextColor() {
 //  ISLAND DEFINITIONS
 // ===============================================================
 const islands = [
-  { id: 'matematica', name: 'Ilha da Matematica', x: 700, y: 700, rx: 380, ry: 320, category: 'matematica', theme: 'blue' },
-  { id: 'historia', name: 'Ilha da Historia', x: 3300, y: 700, rx: 380, ry: 320, category: 'historia', theme: 'brown' },
-  { id: 'ciencias', name: 'Ilha das Ciencias', x: 2000, y: 1600, rx: 400, ry: 340, category: 'ciencias', theme: 'green' },
-  { id: 'linguas', name: 'Ilha das Linguas', x: 700, y: 3300, rx: 380, ry: 320, category: 'linguas', theme: 'purple' },
-  { id: 'programacao', name: 'Ilha da Programacao', x: 3300, y: 3300, rx: 380, ry: 320, category: 'programacao', theme: 'neon' },
-  { id: 'central', name: 'Ilha Central', x: 2000, y: 2800, rx: 450, ry: 380, category: null, theme: 'gold' }
+  { id: 'matematica', name: 'Ilha da Matematica', x: 700, y: 700, rx: 380, ry: 320, category: 'matematica', theme: 'blue',
+    points: [
+      {x: -350, y: -50}, {x: -310, y: -190}, {x: -200, y: -280}, {x: -60, y: -310},
+      {x: 80, y: -290}, {x: 200, y: -260}, {x: 310, y: -200}, {x: 360, y: -80},
+      {x: 370, y: 50}, {x: 340, y: 160}, {x: 280, y: 240}, {x: 160, y: 300},
+      {x: 30, y: 280}, {x: -100, y: 310}, {x: -220, y: 260}, {x: -330, y: 170},
+      {x: -370, y: 60}
+    ]
+  },
+  { id: 'historia', name: 'Ilha da Historia', x: 3300, y: 700, rx: 380, ry: 320, category: 'historia', theme: 'brown',
+    points: [
+      {x: -340, y: -100}, {x: -280, y: -240}, {x: -140, y: -300}, {x: 20, y: -280},
+      {x: 150, y: -310}, {x: 280, y: -250}, {x: 360, y: -130}, {x: 370, y: 20},
+      {x: 330, y: 140}, {x: 250, y: 250}, {x: 120, y: 290}, {x: -30, y: 310},
+      {x: -180, y: 270}, {x: -300, y: 180}, {x: -370, y: 50}, {x: -360, y: -30}
+    ]
+  },
+  { id: 'ciencias', name: 'Ilha das Ciencias', x: 2000, y: 1600, rx: 400, ry: 340, category: 'ciencias', theme: 'green',
+    points: [
+      {x: -380, y: -30}, {x: -340, y: -180}, {x: -240, y: -290}, {x: -90, y: -330},
+      {x: 60, y: -310}, {x: 180, y: -340}, {x: 300, y: -270}, {x: 380, y: -140},
+      {x: 390, y: 10}, {x: 360, y: 150}, {x: 260, y: 270}, {x: 130, y: 320},
+      {x: -20, y: 340}, {x: -160, y: 300}, {x: -290, y: 220}, {x: -380, y: 110},
+      {x: -400, y: -10}
+    ]
+  },
+  { id: 'linguas', name: 'Ilha das Linguas', x: 700, y: 3300, rx: 380, ry: 320, category: 'linguas', theme: 'purple',
+    points: [
+      {x: -310, y: -140}, {x: -220, y: -270}, {x: -70, y: -310}, {x: 90, y: -300},
+      {x: 230, y: -240}, {x: 340, y: -140}, {x: 370, y: 0}, {x: 350, y: 130},
+      {x: 280, y: 230}, {x: 170, y: 280}, {x: 40, y: 320}, {x: -120, y: 290},
+      {x: -250, y: 220}, {x: -350, y: 100}, {x: -370, y: -30}
+    ]
+  },
+  { id: 'programacao', name: 'Ilha da Programacao', x: 3300, y: 3300, rx: 380, ry: 320, category: 'programacao', theme: 'neon',
+    points: [
+      {x: -360, y: -80}, {x: -300, y: -210}, {x: -170, y: -290}, {x: -20, y: -320},
+      {x: 130, y: -280}, {x: 260, y: -300}, {x: 350, y: -190}, {x: 380, y: -50},
+      {x: 360, y: 80}, {x: 300, y: 190}, {x: 180, y: 270}, {x: 40, y: 310},
+      {x: -110, y: 290}, {x: -240, y: 230}, {x: -340, y: 120}, {x: -380, y: -10}
+    ]
+  },
+  { id: 'central', name: 'Ilha Central', x: 2000, y: 2800, rx: 450, ry: 380, category: null, theme: 'gold',
+    points: [
+      {x: -430, y: -60}, {x: -390, y: -200}, {x: -280, y: -320}, {x: -130, y: -370},
+      {x: 30, y: -360}, {x: 170, y: -340}, {x: 310, y: -280}, {x: 420, y: -160},
+      {x: 440, y: -20}, {x: 430, y: 120}, {x: 370, y: 250}, {x: 250, y: 340},
+      {x: 100, y: 370}, {x: -50, y: 380}, {x: -200, y: 340}, {x: -330, y: 250},
+      {x: -420, y: 130}, {x: -450, y: 0}
+    ]
+  }
 ];
 
 // Bridges connecting islands
@@ -242,15 +287,32 @@ const bullets = [];   // { id, ownerId, x, y, vx, vy, dist, maxDist, color }
 const activeQuizzes = {}; // socketId -> { enemyId, questionIndex, category, timestamp, totemId }
 
 let enemyIdCounter = 0;
-const MAX_ENEMIES = 30;
-const ENEMY_SPAWN_INTERVAL = 3000;
-const QUIZ_TIME_LIMIT = 10000; // 10 seconds
+const MAX_ENEMIES = 12;
+const ENEMY_SPAWN_INTERVAL = 8000;
+const QUIZ_TIME_LIMIT = 60000; // 60 seconds – safety net; quiz closes when player answers
+
+function pointInPolygon(px, py, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].x, yi = polygon[i].y;
+    const xj = polygon[j].x, yj = polygon[j].y;
+    if (((yi > py) !== (yj > py)) && (px < (xj - xi) * (py - yi) / (yj - yi) + xi)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
 
 function getIslandAt(x, y) {
   for (const isl of islands) {
-    const dx = x - isl.x;
-    const dy = y - isl.y;
-    if ((dx * dx) / (isl.rx * isl.rx) + (dy * dy) / (isl.ry * isl.ry) <= 1) return isl;
+    if (isl.points) {
+      const absPoints = isl.points.map(p => ({ x: isl.x + p.x, y: isl.y + p.y }));
+      if (pointInPolygon(x, y, absPoints)) return isl;
+    } else {
+      const dx = x - isl.x;
+      const dy = y - isl.y;
+      if ((dx * dx) / (isl.rx * isl.rx) + (dy * dy) / (isl.ry * isl.ry) <= 1) return isl;
+    }
   }
   return null;
 }
@@ -291,6 +353,16 @@ function isOnLand(x, y) {
 
 function randomSpawnOnIsland() {
   const isl = islands[Math.floor(Math.random() * islands.length)];
+  if (isl.points) {
+    // Use rejection sampling within bounding box of polygon
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const x = isl.x + (Math.random() - 0.5) * isl.rx * 1.6;
+      const y = isl.y + (Math.random() - 0.5) * isl.ry * 1.6;
+      const absPoints = isl.points.map(p => ({ x: isl.x + p.x, y: isl.y + p.y }));
+      if (pointInPolygon(x, y, absPoints)) return { x, y };
+    }
+  }
+  // Fallback to ellipse
   const angle = Math.random() * Math.PI * 2;
   const r = Math.random() * 0.4;
   return {
@@ -325,24 +397,39 @@ function spawnEnemy() {
   const themedIslands = islands.filter(i => i.category !== null);
   const isl = themedIslands[Math.floor(Math.random() * themedIslands.length)];
 
-  const isBoss = Math.random() < 0.15;
-  const angle = Math.random() * Math.PI * 2;
-  const r = 0.3 + Math.random() * 0.5;
+  const isBoss = Math.random() < 0.08;
+
+  // Spawn at a valid position within the polygon
+  let spawnX, spawnY;
+  if (isl.points) {
+    const absPoints = isl.points.map(p => ({ x: isl.x + p.x, y: isl.y + p.y }));
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const tx = isl.x + (Math.random() - 0.5) * isl.rx * 1.4;
+      const ty = isl.y + (Math.random() - 0.5) * isl.ry * 1.4;
+      if (pointInPolygon(tx, ty, absPoints)) { spawnX = tx; spawnY = ty; break; }
+    }
+    if (spawnX === undefined) { spawnX = isl.x; spawnY = isl.y; }
+  } else {
+    const angle = Math.random() * Math.PI * 2;
+    const r = 0.3 + Math.random() * 0.5;
+    spawnX = isl.x + Math.cos(angle) * isl.rx * r;
+    spawnY = isl.y + Math.sin(angle) * isl.ry * r;
+  }
 
   const id = 'e' + (++enemyIdCounter);
   enemies[id] = {
     id,
-    x: isl.x + Math.cos(angle) * isl.rx * r,
-    y: isl.y + Math.sin(angle) * isl.ry * r,
+    x: spawnX,
+    y: spawnY,
     hp: isBoss ? 6 : 3,
     maxHp: isBoss ? 6 : 3,
     type: isBoss ? 'boss' : 'normal',
-    speed: isBoss ? 0.8 : 1.4,
+    speed: isBoss ? 0.5 : 0.7,
     size: isBoss ? 28 : 16,
     island: isl.id,
     patrolAngle: Math.random() * Math.PI * 2,
-    patrolCenterX: isl.x + Math.cos(angle) * isl.rx * r * 0.5,
-    patrolCenterY: isl.y + Math.sin(angle) * isl.ry * r * 0.5,
+    patrolCenterX: (spawnX + isl.x) / 2,
+    patrolCenterY: (spawnY + isl.y) / 2,
     patrolRadius: 40 + Math.random() * 60,
     chasing: false,
     flashUntil: 0
@@ -380,7 +467,7 @@ function gameTick() {
   // Move enemies
   for (const eid in enemies) {
     const e = enemies[eid];
-    const nearPlayer = findNearestPlayer(e.x, e.y, 200);
+    const nearPlayer = findNearestPlayer(e.x, e.y, 150);
 
     if (nearPlayer) {
       // Chase mode
@@ -394,8 +481,10 @@ function gameTick() {
       }
 
       // Collision with player - deal damage
+      // Don't damage players who are in a quiz
+      if (activeQuizzes[nearPlayer.id]) continue;
       if (dist < e.size + 16) {
-        nearPlayer.health -= 10;
+        nearPlayer.health -= 5;
         if (nearPlayer.health < 0) nearPlayer.health = 0;
         io.to(nearPlayer.id).emit('damage', { health: nearPlayer.health });
 
@@ -576,8 +665,16 @@ io.on('connection', (socket) => {
   socket.on('move', (data) => {
     const p = players[socket.id];
     if (!p || p.health <= 0) return;
-    p.x = Math.max(0, Math.min(MAP_W, data.x));
-    p.y = Math.max(0, Math.min(MAP_H, data.y));
+    const newX = Math.max(0, Math.min(MAP_W, data.x));
+    const newY = Math.max(0, Math.min(MAP_H, data.y));
+
+    // Only allow movement to land or bridges
+    if (isOnLand(newX, newY)) {
+      p.x = newX;
+      p.y = newY;
+    }
+    // If not on land, don't update position (player stays where they were)
+
     p.direction = data.direction || p.direction;
     p.isMoving = data.isMoving || false;
   });
