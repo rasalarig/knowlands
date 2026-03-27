@@ -3,40 +3,125 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Knowlands - Jogo</title>
+  <title>Knowlands - Ilhas do Conhecimento</title>
   <link rel="stylesheet" href="game.css" />
 </head>
 <body>
   <canvas id="gameCanvas"></canvas>
 
-  <!-- HUD -->
-  <div id="hud-top-left" class="hud-panel">
-    <div id="playerName" class="hud-name">Jogador</div>
-    <div id="playerScore" class="hud-score">Pontos: 0</div>
+  <!-- HUD Top Left: Player Info -->
+  <div id="hud-player-info" class="hud-panel">
+    <div class="player-header">
+      <div id="levelBadge" class="level-badge">1</div>
+      <div class="player-details">
+        <div id="playerName" class="hud-name">Jogador</div>
+        <div class="coin-display">
+          <span class="coin-icon">&#9733;</span>
+          <span id="coinCount">0</span>
+        </div>
+      </div>
+    </div>
+    <div class="bars-container">
+      <div class="bar-row">
+        <span class="bar-label">HP</span>
+        <div class="bar-bg health-bar-bg">
+          <div id="healthBarFill" class="bar-fill health-bar-fill"></div>
+        </div>
+        <span id="healthText" class="bar-value">100</span>
+      </div>
+      <div class="bar-row">
+        <span class="bar-label">XP</span>
+        <div class="bar-bg xp-bar-bg">
+          <div id="xpBarFill" class="bar-fill xp-bar-fill"></div>
+        </div>
+        <span id="xpText" class="bar-value">0/100</span>
+      </div>
+    </div>
   </div>
 
+  <!-- HUD Top Right: Island + Online -->
   <div id="hud-top-right" class="hud-panel">
-    <div id="playerCount">Online: 1</div>
+    <button id="exitGameBtn" class="exit-btn" title="Sair do jogo">&#10005; Sair</button>
+    <div id="islandIndicator" class="island-indicator">Oceano</div>
+    <div id="playerCount" class="online-count">Online: 1</div>
     <div id="killFeed" class="kill-feed"></div>
   </div>
 
-  <div id="hud-health">
-    <div id="healthBarBg" class="health-bar-bg">
-      <div id="healthBarFill" class="health-bar-fill"></div>
+  <!-- Quiz Modal -->
+  <div id="quizModal" class="quiz-modal" style="display:none;">
+    <div class="quiz-box">
+      <div class="quiz-header">
+        <span id="quizCategory" class="quiz-category">Categoria</span>
+        <div id="quizTimer" class="quiz-timer">
+          <svg class="timer-svg" viewBox="0 0 40 40">
+            <circle class="timer-bg-circle" cx="20" cy="20" r="18"></circle>
+            <circle id="timerCircle" class="timer-circle" cx="20" cy="20" r="18"></circle>
+          </svg>
+          <span id="timerText" class="timer-text">10</span>
+        </div>
+      </div>
+      <p id="quizQuestion" class="quiz-question">Pergunta aqui?</p>
+      <div class="quiz-options">
+        <button class="quiz-btn quiz-btn-a" data-index="0"><span class="btn-letter">A</span><span id="optA" class="btn-text"></span></button>
+        <button class="quiz-btn quiz-btn-b" data-index="1"><span class="btn-letter">B</span><span id="optB" class="btn-text"></span></button>
+        <button class="quiz-btn quiz-btn-c" data-index="2"><span class="btn-letter">C</span><span id="optC" class="btn-text"></span></button>
+        <button class="quiz-btn quiz-btn-d" data-index="3"><span class="btn-letter">D</span><span id="optD" class="btn-text"></span></button>
+      </div>
     </div>
-    <div id="healthText" class="health-text">100 / 100</div>
+  </div>
+
+  <!-- Quiz Result Feedback -->
+  <div id="quizFeedback" class="quiz-feedback" style="display:none;">
+    <div id="feedbackContent" class="feedback-content"></div>
+  </div>
+
+  <!-- Level Up Celebration -->
+  <div id="levelUpOverlay" class="levelup-overlay" style="display:none;">
+    <div class="levelup-content">
+      <div class="levelup-title">LEVEL UP!</div>
+      <div id="levelUpNumber" class="levelup-number">2</div>
+      <div class="levelup-subtitle">Parabens! Continue aprendendo!</div>
+    </div>
+  </div>
+
+  <!-- Ranking Panel (togglable with Tab) -->
+  <div id="rankingPanel" class="ranking-panel" style="display:none;">
+    <div class="ranking-header">Ranking</div>
+    <div id="rankingList" class="ranking-list"></div>
+  </div>
+
+  <!-- Chat Area -->
+  <div id="chatArea" class="chat-area">
+    <div id="chatMessages" class="chat-messages"></div>
+    <input id="chatInput" class="chat-input" type="text" placeholder="Pressione T para chat..." maxlength="100" style="display:none;" />
+  </div>
+
+  <!-- Controls Hint -->
+  <div id="controlsHint" class="controls-hint">
+    WASD: Mover &nbsp;|&nbsp; ESPACO: Atacar &nbsp;|&nbsp; E: Interagir &nbsp;|&nbsp; T: Chat &nbsp;|&nbsp; Tab: Ranking
   </div>
 
   <!-- Game Over Overlay -->
   <div id="gameOverOverlay" class="game-over-overlay" style="display:none;">
     <div class="game-over-box">
       <h2>Voce foi derrotado!</h2>
-      <p id="gameOverScore">Pontuacao: 0</p>
+      <p id="gameOverScore">XP: 0 | Nivel: 1</p>
       <button id="respawnBtn" class="respawn-btn">Renascer</button>
     </div>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="game.js"></script>
+
+  <!-- Mobile Touch Controls -->
+  <div id="mobileControls" class="mobile-controls">
+    <div class="dpad">
+      <button class="dpad-btn dpad-up" data-dir="up">&#9650;</button>
+      <button class="dpad-btn dpad-left" data-dir="left">&#9664;</button>
+      <button class="dpad-btn dpad-right" data-dir="right">&#9654;</button>
+      <button class="dpad-btn dpad-down" data-dir="down">&#9660;</button>
+    </div>
+    <button class="touch-fire-btn" id="touchFireBtn">&#9876;</button>
+  </div>
 </body>
 </html>

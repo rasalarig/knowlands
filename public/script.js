@@ -1,5 +1,7 @@
 /* ---- Google OAuth2 ---- */
 let googleClientId = '';
+let googleInitRetries = 0;
+const MAX_GOOGLE_RETRIES = 5;
 
 async function initGoogleAuth() {
   try {
@@ -7,34 +9,56 @@ async function initGoogleAuth() {
     const data = await res.json();
     googleClientId = data.clientId;
 
+    const btn = document.getElementById('googleSignInBtn');
+
     if (googleClientId) {
-      // Show Google button and divider (hidden by default)
-      const container = document.getElementById('googleBtnContainer');
-      if (container) container.style.display = '';
-      const divider = document.getElementById('googleDivider');
-      if (divider) divider.style.display = '';
+      // Client ID is available - try to initialize GSI
+      if (typeof google !== 'undefined' && google.accounts && google.accounts.id) {
+        // GSI is loaded, initialize normally
+        google.accounts.id.initialize({
+          client_id: googleClientId,
+          callback: handleGoogleLogin,
+          auto_select: false
+        });
 
-      // Initialize Google Identity Services
-      google.accounts.id.initialize({
-        client_id: googleClientId,
-        callback: handleGoogleLogin,
-        auto_select: false
-      });
-
-      // Setup the custom button click
-      const btn = document.getElementById('googleSignInBtn');
+        if (btn) {
+          btn.addEventListener('click', () => {
+            google.accounts.id.prompt((notification) => {
+              if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
+                google.accounts.id.prompt();
+              }
+            });
+          });
+        }
+      } else if (googleInitRetries < MAX_GOOGLE_RETRIES) {
+        // GSI not loaded yet, retry after a delay
+        googleInitRetries++;
+        setTimeout(initGoogleAuth, 1000);
+      } else {
+        // Max retries reached, show error on click
+        if (btn) {
+          btn.addEventListener('click', () => {
+            showMsg('loginError', 'Login com Google nao disponivel. Tente recarregar a pagina.');
+          });
+        }
+      }
+    } else {
+      // No client ID configured - show error on click
       if (btn) {
         btn.addEventListener('click', () => {
-          google.accounts.id.prompt((notification) => {
-            if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-              google.accounts.id.prompt();
-            }
-          });
+          showMsg('loginError', 'Login com Google nao configurado.');
         });
       }
     }
   } catch (err) {
     console.warn('Google Auth not available:', err);
+    // On fetch error, still let the button work but show an error
+    const btn = document.getElementById('googleSignInBtn');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        showMsg('loginError', 'Login com Google nao disponivel.');
+      });
+    }
   }
 }
 
@@ -59,9 +83,11 @@ async function handleGoogleLogin(response) {
     sessionStorage.setItem('username', data.user.name);
     sessionStorage.setItem('email', data.user.email);
     if (data.user.picture) sessionStorage.setItem('picture', data.user.picture);
+    // Clear any previous character selection so user picks again
+    sessionStorage.removeItem('characterId');
 
     showMsg('loginSuccess', 'Login com Google bem-sucedido! Entrando...');
-    setTimeout(() => { window.location.href = '/game.html'; }, 600);
+    setTimeout(() => { window.location.href = '/select.html'; }, 600);
   } catch (err) {
     showMsg('loginError', 'Erro de conexao. Tente novamente.');
   }
@@ -169,8 +195,10 @@ if (loginForm) {
 
       sessionStorage.setItem('username', data.user.name);
       sessionStorage.setItem('email', data.user.email);
+      // Clear any previous character selection so user picks again
+      sessionStorage.removeItem('characterId');
       showMsg('loginSuccess', 'Login bem-sucedido! Entrando...');
-      setTimeout(() => { window.location.href = '/game.html'; }, 600);
+      setTimeout(() => { window.location.href = '/select.html'; }, 600);
     } catch (err) {
       showMsg('loginError', 'Erro de conexao. Tente novamente.');
     }
