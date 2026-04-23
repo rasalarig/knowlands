@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const fs = require('fs');
 const { OAuth2Client } = require('google-auth-library');
 
 const app = express();
@@ -15,8 +16,125 @@ const io = new Server(server, {
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --------------- In-memory user store ---------------
+// --------------- Persistence ---------------
+const DATA_DIR = path.join(__dirname, 'data');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+
+// Ensure data directory exists
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+// In-memory store (backed by file)
+let persistedUsers = {};
+
+function loadData() {
+  try {
+    if (fs.existsSync(USERS_FILE)) {
+      const raw = fs.readFileSync(USERS_FILE, 'utf8');
+      persistedUsers = JSON.parse(raw);
+      console.log('Loaded', Object.keys(persistedUsers).length, 'user(s) from disk.');
+    }
+  } catch (err) {
+    console.error('Failed to load users.json (starting fresh):', err.message);
+    persistedUsers = {};
+  }
+}
+
+let _saveTimer = null;
+function saveData() {
+  if (_saveTimer) return; // already scheduled
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null;
+    try {
+      fs.writeFileSync(USERS_FILE, JSON.stringify(persistedUsers, null, 2), 'utf8');
+    } catch (err) {
+      console.error('Failed to save users.json:', err.message);
+    }
+  }, 2000); // debounce: write at most every 2 seconds
+}
+
+function defaultUserRecord(email, name, extraFields) {
+  return Object.assign({
+    email,
+    name,
+    hash: null,
+    googleUser: false,
+    picture: '',
+    profile: { xp: 0, level: 1, coins: 0 },
+    quizHistory: [],
+    notes: {
+      matematica: '',
+      historia: '',
+      ciencias: '',
+      linguas: '',
+      programacao: ''
+    },
+    achievements: [],
+    stats: {
+      totalCorrect: 0,
+      totalWrong: 0,
+      totalDuelsWon: 0,
+      totalDuelsLost: 0,
+      islandsVisited: []
+    }
+  }, extraFields || {});
+}
+
+function getUserData(email) {
+  return persistedUsers[email] || null;
+}
+
+function updateUserData(email, updates) {
+  if (!persistedUsers[email]) return;
+  Object.assign(persistedUsers[email], updates);
+  saveData();
+}
+
+function savePlayerProgress(player) {
+  if (!player || !player.email) return;
+  const rec = persistedUsers[player.email];
+  if (!rec) return;
+  rec.profile = { xp: player.xp, level: player.level, coins: player.coins };
+  saveData();
+}
+
+function recordQuizResult(player, category, correct) {
+  if (!player || !player.email) return;
+  const rec = persistedUsers[player.email];
+  if (!rec) return;
+  if (!rec.quizHistory) rec.quizHistory = [];
+  rec.quizHistory.push({ category, correct, timestamp: Date.now() });
+  // Keep last 200 entries to avoid unbounded growth
+  if (rec.quizHistory.length > 200) rec.quizHistory = rec.quizHistory.slice(-200);
+  if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
+  if (correct) rec.stats.totalCorrect = (rec.stats.totalCorrect || 0) + 1;
+  else rec.stats.totalWrong = (rec.stats.totalWrong || 0) + 1;
+  rec.profile = { xp: player.xp, level: player.level, coins: player.coins };
+  saveData();
+}
+
+function recordDuelResult(player, won) {
+  if (!player || !player.email) return;
+  const rec = persistedUsers[player.email];
+  if (!rec) return;
+  if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
+  if (won) rec.stats.totalDuelsWon = (rec.stats.totalDuelsWon || 0) + 1;
+  else rec.stats.totalDuelsLost = (rec.stats.totalDuelsLost || 0) + 1;
+  rec.profile = { xp: player.xp, level: player.level, coins: player.coins };
+  saveData();
+}
+
+// Load persisted data on startup
+loadData();
+
+// --------------- In-memory user store (auth) ---------------
 const users = new Map();
+
+// Pre-populate in-memory users map from persisted data
+for (const [email, rec] of Object.entries(persistedUsers)) {
+  users.set(email, { name: rec.name, email, hash: rec.hash, googleUser: !!rec.googleUser, picture: rec.picture || '' });
+}
 
 // --------------- REST API ---------------
 app.post('/api/register', async (req, res) => {
@@ -29,6 +147,9 @@ app.post('/api/register', async (req, res) => {
       return res.status(409).json({ error: 'Email ja cadastrado.' });
     }
     const hash = await bcrypt.hash(password, 10);
+    // Persist new user
+    persistedUsers[email] = defaultUserRecord(email, name, { hash });
+    saveData();
     users.set(email, { name, email, hash });
     return res.json({ ok: true, user: { name, email } });
   } catch (err) {
@@ -50,6 +171,11 @@ app.post('/api/login', async (req, res) => {
     const match = await bcrypt.compare(password, user.hash);
     if (!match) {
       return res.status(401).json({ error: 'Credenciais invalidas.' });
+    }
+    // Ensure persisted record exists (migration for old users)
+    if (!persistedUsers[email]) {
+      persistedUsers[email] = defaultUserRecord(email, user.name, { hash: user.hash });
+      saveData();
     }
     return res.json({ ok: true, user: { name: user.name, email: user.email } });
   } catch (err) {
@@ -81,6 +207,16 @@ app.post('/api/auth/google', async (req, res) => {
 
     if (!users.has(email)) {
       users.set(email, { name, email, hash: null, googleUser: true, picture });
+      // Persist new Google user
+      persistedUsers[email] = defaultUserRecord(email, name, { hash: null, googleUser: true, picture });
+      saveData();
+    } else if (!persistedUsers[email]) {
+      // Migration: existing in-memory user not yet persisted
+      const existing = users.get(email);
+      persistedUsers[email] = defaultUserRecord(email, existing.name, {
+        hash: null, googleUser: true, picture: existing.picture || picture
+      });
+      saveData();
     }
 
     const user = users.get(email);
@@ -93,6 +229,34 @@ app.post('/api/auth/google', async (req, res) => {
 
 app.get('/api/auth/google-client-id', (req, res) => {
   res.json({ clientId: GOOGLE_CLIENT_ID });
+});
+
+// --------------- User Data REST API ---------------
+app.get('/api/user/notes/:email', (req, res) => {
+  const rec = getUserData(req.params.email);
+  if (!rec) return res.status(404).json({ error: 'Usuario nao encontrado.' });
+  return res.json({ notes: rec.notes || {} });
+});
+
+app.post('/api/user/notes', (req, res) => {
+  const { email, category, content } = req.body;
+  if (!email || !category) return res.status(400).json({ error: 'email e category sao obrigatorios.' });
+  const rec = getUserData(email);
+  if (!rec) return res.status(404).json({ error: 'Usuario nao encontrado.' });
+  if (!rec.notes) rec.notes = {};
+  rec.notes[category] = content || '';
+  saveData();
+  return res.json({ ok: true });
+});
+
+app.get('/api/user/progress/:email', (req, res) => {
+  const rec = getUserData(req.params.email);
+  if (!rec) return res.status(404).json({ error: 'Usuario nao encontrado.' });
+  return res.json({
+    profile: rec.profile || { xp: 0, level: 1, coins: 0 },
+    quizHistory: rec.quizHistory || [],
+    stats: rec.stats || {}
+  });
 });
 
 // ===============================================================
@@ -160,6 +324,97 @@ const questions = {
     { q: "Localhost geralmente usa porta?", options: ["80", "443", "3000", "8080"], answer: 2 }
   ]
 };
+
+// ===============================================================
+//  ACHIEVEMENTS
+// ===============================================================
+const ACHIEVEMENTS = [
+  // First Steps
+  { id: 'first_correct', name: 'Primeiro Acerto', desc: 'Acertou sua primeira pergunta', icon: '⭐', category: 'geral' },
+  { id: 'first_duel_win', name: 'Duelista', desc: 'Venceu seu primeiro duelo', icon: '⚔️', category: 'geral' },
+
+  // Subject Mastery
+  { id: 'math_5', name: 'Aprendiz de Matematica', desc: 'Acertou 5 perguntas de Matematica', icon: '🔢', category: 'matematica' },
+  { id: 'math_20', name: 'Mestre da Matematica', desc: 'Acertou 20 perguntas de Matematica', icon: '🧮', category: 'matematica' },
+  { id: 'hist_5', name: 'Aprendiz de Historia', desc: 'Acertou 5 perguntas de Historia', icon: '📜', category: 'historia' },
+  { id: 'hist_20', name: 'Mestre da Historia', desc: 'Acertou 20 perguntas de Historia', icon: '🏛️', category: 'historia' },
+  { id: 'sci_5', name: 'Aprendiz de Ciencias', desc: 'Acertou 5 perguntas de Ciencias', icon: '🔬', category: 'ciencias' },
+  { id: 'sci_20', name: 'Mestre das Ciencias', desc: 'Acertou 20 perguntas de Ciencias', icon: '🧬', category: 'ciencias' },
+  { id: 'lang_5', name: 'Aprendiz de Linguas', desc: 'Acertou 5 perguntas de Linguas', icon: '💬', category: 'linguas' },
+  { id: 'lang_20', name: 'Mestre das Linguas', desc: 'Acertou 20 perguntas de Linguas', icon: '🌍', category: 'linguas' },
+  { id: 'prog_5', name: 'Aprendiz de Programacao', desc: 'Acertou 5 perguntas de Programacao', icon: '💻', category: 'programacao' },
+  { id: 'prog_20', name: 'Mestre da Programacao', desc: 'Acertou 20 perguntas de Programacao', icon: '🤖', category: 'programacao' },
+
+  // Milestones
+  { id: 'correct_10', name: 'Estudante Dedicado', desc: 'Acertou 10 perguntas no total', icon: '📚', category: 'geral' },
+  { id: 'correct_50', name: 'Sabio', desc: 'Acertou 50 perguntas no total', icon: '🎓', category: 'geral' },
+  { id: 'correct_100', name: 'Iluminado', desc: 'Acertou 100 perguntas no total', icon: '💡', category: 'geral' },
+  { id: 'level_5', name: 'Aventureiro', desc: 'Alcancou nivel 5', icon: '🗺️', category: 'geral' },
+  { id: 'level_10', name: 'Veterano', desc: 'Alcancou nivel 10', icon: '👑', category: 'geral' },
+  { id: 'duels_5', name: 'Campeao', desc: 'Venceu 5 duelos', icon: '🏅', category: 'geral' },
+  { id: 'duels_10', name: 'Imbativel', desc: 'Venceu 10 duelos', icon: '🏆', category: 'geral' },
+  { id: 'chest_opener', name: 'Cacador de Tesouros', desc: 'Abriu 10 baus de tesouro', icon: '📦', category: 'geral' },
+  { id: 'explorer', name: 'Explorador', desc: 'Visitou todas as 6 ilhas', icon: '🧭', category: 'geral' },
+  { id: 'noter', name: 'Anotador', desc: 'Escreveu notas em todas as materias', icon: '✏️', category: 'geral' },
+];
+
+function checkAchievements(email, socketId) {
+  const userData = getUserData(email);
+  if (!userData) return;
+
+  const history = userData.quizHistory || [];
+  const stats = userData.stats || {};
+  const notes = userData.notes || {};
+  const current = userData.achievements || [];
+  const newAchievements = [];
+
+  // Helper: count correct per category
+  function correctInCat(cat) {
+    return history.filter(q => q.category === cat && q.correct).length;
+  }
+
+  const checks = {
+    'first_correct': () => (stats.totalCorrect || 0) >= 1,
+    'first_duel_win': () => (stats.totalDuelsWon || 0) >= 1,
+    'math_5': () => correctInCat('matematica') >= 5,
+    'math_20': () => correctInCat('matematica') >= 20,
+    'hist_5': () => correctInCat('historia') >= 5,
+    'hist_20': () => correctInCat('historia') >= 20,
+    'sci_5': () => correctInCat('ciencias') >= 5,
+    'sci_20': () => correctInCat('ciencias') >= 20,
+    'lang_5': () => correctInCat('linguas') >= 5,
+    'lang_20': () => correctInCat('linguas') >= 20,
+    'prog_5': () => correctInCat('programacao') >= 5,
+    'prog_20': () => correctInCat('programacao') >= 20,
+    'correct_10': () => (stats.totalCorrect || 0) >= 10,
+    'correct_50': () => (stats.totalCorrect || 0) >= 50,
+    'correct_100': () => (stats.totalCorrect || 0) >= 100,
+    'level_5': () => (userData.profile && userData.profile.level >= 5) || false,
+    'level_10': () => (userData.profile && userData.profile.level >= 10) || false,
+    'duels_5': () => (stats.totalDuelsWon || 0) >= 5,
+    'duels_10': () => (stats.totalDuelsWon || 0) >= 10,
+    'chest_opener': () => history.filter(q => q.source === 'chest' && q.correct).length >= 10,
+    'explorer': () => ((stats.islandsVisited || []).length) >= 6,
+    'noter': () => Object.values(notes).filter(n => n && n.trim().length > 0).length >= 5,
+  };
+
+  for (const [id, check] of Object.entries(checks)) {
+    if (!current.includes(id) && check()) {
+      current.push(id);
+      newAchievements.push(id);
+    }
+  }
+
+  if (newAchievements.length > 0) {
+    updateUserData(email, { achievements: current });
+    newAchievements.forEach(achId => {
+      const ach = ACHIEVEMENTS.find(a => a.id === achId);
+      if (ach) {
+        io.to(socketId).emit('achievementUnlocked', ach);
+      }
+    });
+  }
+}
 
 // ===============================================================
 //  GAME CONSTANTS
@@ -279,12 +534,110 @@ islands.forEach(isl => {
 });
 
 // ===============================================================
+//  TREASURE CHESTS
+// ===============================================================
+const chests = [];
+islands.forEach(isl => {
+  if (!isl.category) return; // skip central island
+  for (let i = 0; i < 3; i++) {
+    const angle = (i / 3) * Math.PI * 2 + 1.2; // offset from totems
+    chests.push({
+      id: 'chest_' + isl.id + '_' + i,
+      x: isl.x + Math.cos(angle) * isl.rx * 0.65,
+      y: isl.y + Math.sin(angle) * isl.ry * 0.65,
+      category: isl.category,
+      island: isl.id,
+      openedBy: {}, // socketId -> timestamp (cooldown tracking)
+      respawnTime: 60000 // 60 seconds cooldown per player
+    });
+  }
+});
+
+// ===============================================================
+//  INFO SIGNS
+// ===============================================================
+const studyTips = {
+  matematica: [
+    "Dica: Pratique tabuada todos os dias por 5 minutos!",
+    "Dica: Desenhe figuras geometricas para entender melhor!",
+    "Dica: Use a calculadora para conferir, nao para resolver!"
+  ],
+  historia: [
+    "Dica: Crie uma linha do tempo para memorizar datas!",
+    "Dica: Associe eventos historicos a historias e personagens!",
+    "Dica: Assista documentarios para fixar o conteudo!"
+  ],
+  ciencias: [
+    "Dica: Faca experimentos simples em casa para aprender!",
+    "Dica: Conecte a ciencia ao seu dia a dia!",
+    "Dica: Desenhe diagramas para entender processos!"
+  ],
+  linguas: [
+    "Dica: Ouca musicas em outros idiomas com a letra!",
+    "Dica: Pratique 10 palavras novas por dia!",
+    "Dica: Assista filmes com legendas no idioma original!"
+  ],
+  programacao: [
+    "Dica: Escreva codigo todos os dias, mesmo que pouco!",
+    "Dica: Leia codigo de outros programadores para aprender!",
+    "Dica: Divida problemas grandes em pedacos menores!"
+  ]
+};
+
+const infoSigns = [];
+islands.forEach(isl => {
+  if (!isl.category) return;
+  for (let i = 0; i < 2; i++) {
+    const angle = (i / 2) * Math.PI * 2 + 2.0;
+    infoSigns.push({
+      id: 'sign_' + isl.id + '_' + i,
+      x: isl.x + Math.cos(angle) * isl.rx * 0.4,
+      y: isl.y + Math.sin(angle) * isl.ry * 0.4,
+      category: isl.category,
+      island: isl.id,
+      tipIndex: i
+    });
+  }
+});
+
+// ===============================================================
+//  MINI LESSONS (for totem interactions)
+// ===============================================================
+const miniLessons = {
+  matematica: [
+    "A soma dos angulos internos de qualquer triangulo e sempre 180 graus.",
+    "O numero Pi (pi ~= 3.14159) e a razao entre a circunferencia e o diametro de um circulo.",
+    "Numeros primos so sao divisiveis por 1 e por eles mesmos."
+  ],
+  historia: [
+    "A Revolucao Francesa de 1789 introduziu os principios de Liberdade, Igualdade e Fraternidade.",
+    "O Imperio Romano durou mais de 1.000 anos e influenciou direito, lingua e cultura ocidental.",
+    "A Revolucao Industrial transformou a producao manual em mecanizada no seculo XVIII."
+  ],
+  ciencias: [
+    "A fotossintese converte luz solar, agua e CO2 em glicose e oxigenio.",
+    "A Lei da Gravitacao Universal de Newton descreve a forca de atracao entre corpos massivos.",
+    "O DNA carrega a informacao genetica em uma dupla helice de nucleotideos."
+  ],
+  linguas: [
+    "O Mandarim e o idioma com mais falantes nativos do mundo, com mais de 1 bilhao.",
+    "O latim e considerado lingua-mae das linguas romanicas: portugues, espanhol, frances, italiano.",
+    "A linguagem corporal e responsavel por mais de 55% da comunicacao humana."
+  ],
+  programacao: [
+    "Algoritmos sao sequencias de instrucoes logicas para resolver um problema.",
+    "O conceito de 'bug' em programacao vem literalmente de um inseto encontrado num computador em 1947.",
+    "A internet foi criada pelo CERN em 1989 por Tim Berners-Lee como a World Wide Web."
+  ]
+};
+
+// ===============================================================
 //  GAME STATE
 // ===============================================================
 const players = {};   // socketId -> player data
 const enemies = {};   // id -> enemy data
 const bullets = [];   // { id, ownerId, x, y, vx, vy, dist, maxDist, color }
-const activeQuizzes = {}; // socketId -> { enemyId, questionIndex, category, timestamp, totemId }
+const activeQuizzes = {}; // socketId -> { enemyId, questionIndex, category, timestamp, totemId, chestId }
 
 const activeDuels = {}; // duelId -> { challengerId, targetId, question, category, startTime, answers: {} }
 const pendingDuels = {}; // targetSocketId -> { challengerId, challengerName, duelId, timestamp }
@@ -527,6 +880,10 @@ function resolveDuel(duelId) {
     });
 
     io.emit('killfeed', { text: (winner?.name || 'Jogador') + ' venceu um duelo contra ' + (loser?.name || 'Jogador') + '!' });
+    // Persist duel results
+    if (winner) recordDuelResult(winner, true);
+    if (loser) recordDuelResult(loser, false);
+    if (winner && winner.email) checkAchievements(winner.email, winnerId);
   } else {
     // Both wrong
     if (challenger) { challenger.health = Math.max(0, challenger.health - 5); }
@@ -546,6 +903,9 @@ function resolveDuel(duelId) {
     });
 
     io.emit('killfeed', { text: 'Duelo entre ' + (challenger?.name || '?') + ' e ' + (target?.name || '?') + ' terminou em empate!' });
+    // Persist draw (both lost)
+    if (challenger) recordDuelResult(challenger, false);
+    if (target) recordDuelResult(target, false);
   }
 
   delete activeDuels[duelId];
@@ -586,7 +946,7 @@ function gameTick() {
       // Collision with player - deal damage
       // Don't damage players who are in a quiz
       if (activeQuizzes[nearPlayer.id]) continue;
-      if (dist < e.size + 16) {
+      if (dist < e.size + 24) {
         nearPlayer.health -= 5;
         if (nearPlayer.health < 0) nearPlayer.health = 0;
         io.to(nearPlayer.id).emit('damage', { health: nearPlayer.health });
@@ -758,18 +1118,25 @@ io.on('connection', (socket) => {
     const color = nextColor();
     const validChars = ['luna', 'blaze', 'coral', 'pixel', 'flora'];
     const charId = validChars.includes(data.characterId) ? data.characterId : 'luna';
+
+    // Load persisted profile if available
+    const email = data.email || null;
+    const rec = email ? getUserData(email) : null;
+    const profile = rec && rec.profile ? rec.profile : { xp: 0, level: 1, coins: 0 };
+
     players[socket.id] = {
       id: socket.id,
       name: data.name || 'Jogador',
+      email: email,
       characterId: charId,
       x: spawn.x,
       y: spawn.y,
       color,
       score: 0,
       health: 100,
-      xp: 0,
-      level: 1,
-      coins: 0,
+      xp: profile.xp || 0,
+      level: profile.level || 1,
+      coins: profile.coins || 0,
       direction: 'down',
       isMoving: false
     };
@@ -780,8 +1147,12 @@ io.on('connection', (socket) => {
       islands,
       bridges,
       totems,
+      chests: chests.map(c => ({ id: c.id, x: c.x, y: c.y, category: c.category, island: c.island })),
+      infoSigns,
       mapW: MAP_W,
-      mapH: MAP_H
+      mapH: MAP_H,
+      allAchievements: ACHIEVEMENTS,
+      unlockedAchievements: (rec && rec.achievements) ? rec.achievements : []
     });
 
     io.emit('playerCount', { count: Object.keys(players).length });
@@ -803,6 +1174,23 @@ io.on('connection', (socket) => {
 
     p.direction = data.direction || p.direction;
     p.isMoving = data.isMoving || false;
+
+    // Track island visits for achievements
+    if (p.email) {
+      const curIsland = getIslandAt(p.x, p.y);
+      if (curIsland) {
+        const rec = persistedUsers[p.email];
+        if (rec) {
+          if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
+          if (!rec.stats.islandsVisited) rec.stats.islandsVisited = [];
+          if (!rec.stats.islandsVisited.includes(curIsland.id)) {
+            rec.stats.islandsVisited.push(curIsland.id);
+            saveData();
+            checkAchievements(p.email, socket.id);
+          }
+        }
+      }
+    }
   });
 
   socket.on('shoot', (data) => {
@@ -845,31 +1233,85 @@ io.on('connection', (socket) => {
     const pool = questions[category];
     const correctText = pool && pool[quiz.questionIndex] ? pool[quiz.questionIndex].options[quiz.correctAnswer] : '';
 
+    // Chest quizzes give 2x rewards (30 XP + 10 coins)
+    const isChest = !!quiz.isChest;
+
     if (correct) {
-      // Damage the enemy
-      const enemy = enemies[quiz.enemyId];
-      if (enemy) {
-        enemy.hp--;
-        if (enemy.hp <= 0) {
-          const xpGain = enemy.type === 'boss' ? 30 : 15;
-          const coinGain = enemy.type === 'boss' ? 15 : 5;
-          p.xp += xpGain;
-          p.coins += coinGain;
-          p.score += xpGain;
-          const newLevel = Math.floor(p.xp / 100) + 1;
-          if (newLevel > p.level) {
-            p.level = newLevel;
-            p.health = 100; // Full heal on level up
-            io.emit('levelUp', { level: p.level, name: p.name });
-            io.emit('killfeed', { text: p.name + ' subiu para nivel ' + p.level + '!' });
+      if (isChest) {
+        // Double rewards for chest quiz
+        const xpGain = 30;
+        const coinGain = 10;
+        p.xp += xpGain;
+        p.coins += coinGain;
+        p.score += xpGain;
+        const newLevel = Math.floor(p.xp / 100) + 1;
+        if (newLevel > p.level) {
+          p.level = newLevel;
+          p.health = 100;
+          io.emit('levelUp', { level: p.level, name: p.name });
+          io.emit('killfeed', { text: p.name + ' subiu para nivel ' + p.level + '!' });
+        }
+        io.to(socket.id).emit('quizResult', {
+          correct: true, xp: xpGain, coins: coinGain, damage: 0,
+          correctAnswer: correctText, health: p.health, killed: false,
+          isChest: true, bonus: '2x'
+        });
+        // Record in quizHistory with source
+        if (p.email) {
+          const rec = persistedUsers[p.email];
+          if (rec) {
+            if (!rec.quizHistory) rec.quizHistory = [];
+            rec.quizHistory.push({ category, correct: true, timestamp: Date.now(), source: 'chest' });
+            if (rec.quizHistory.length > 200) rec.quizHistory = rec.quizHistory.slice(-200);
+            if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
+            rec.stats.totalCorrect = (rec.stats.totalCorrect || 0) + 1;
+            rec.profile = { xp: p.xp, level: p.level, coins: p.coins };
+            saveData();
+            checkAchievements(p.email, socket.id);
           }
-          io.emit('enemyDeath', { id: quiz.enemyId, x: enemy.x, y: enemy.y, island: enemy.island });
-          delete enemies[quiz.enemyId];
-          io.to(socket.id).emit('quizResult', {
-            correct: true, xp: xpGain, coins: coinGain, damage: 0,
-            correctAnswer: correctText, health: p.health, killed: true
-          });
+        }
+      } else {
+        // Damage the enemy
+        const enemy = enemies[quiz.enemyId];
+        if (enemy) {
+          enemy.hp--;
+          if (enemy.hp <= 0) {
+            const xpGain = enemy.type === 'boss' ? 30 : 15;
+            const coinGain = enemy.type === 'boss' ? 15 : 5;
+            p.xp += xpGain;
+            p.coins += coinGain;
+            p.score += xpGain;
+            const newLevel = Math.floor(p.xp / 100) + 1;
+            if (newLevel > p.level) {
+              p.level = newLevel;
+              p.health = 100; // Full heal on level up
+              io.emit('levelUp', { level: p.level, name: p.name });
+              io.emit('killfeed', { text: p.name + ' subiu para nivel ' + p.level + '!' });
+            }
+            io.emit('enemyDeath', { id: quiz.enemyId, x: enemy.x, y: enemy.y, island: enemy.island });
+            delete enemies[quiz.enemyId];
+            io.to(socket.id).emit('quizResult', {
+              correct: true, xp: xpGain, coins: coinGain, damage: 0,
+              correctAnswer: correctText, health: p.health, killed: true
+            });
+          } else {
+            p.xp += 15;
+            p.coins += 5;
+            p.score += 15;
+            const newLevel = Math.floor(p.xp / 100) + 1;
+            if (newLevel > p.level) {
+              p.level = newLevel;
+              p.health = 100;
+              io.emit('levelUp', { level: p.level, name: p.name });
+              io.emit('killfeed', { text: p.name + ' subiu para nivel ' + p.level + '!' });
+            }
+            io.to(socket.id).emit('quizResult', {
+              correct: true, xp: 15, coins: 5, damage: 0,
+              correctAnswer: correctText, health: p.health, killed: false
+            });
+          }
         } else {
+          // Enemy already dead (or totem quiz)
           p.xp += 15;
           p.coins += 5;
           p.score += 15;
@@ -878,28 +1320,14 @@ io.on('connection', (socket) => {
             p.level = newLevel;
             p.health = 100;
             io.emit('levelUp', { level: p.level, name: p.name });
-            io.emit('killfeed', { text: p.name + ' subiu para nivel ' + p.level + '!' });
           }
           io.to(socket.id).emit('quizResult', {
             correct: true, xp: 15, coins: 5, damage: 0,
             correctAnswer: correctText, health: p.health, killed: false
           });
         }
-      } else {
-        // Enemy already dead
-        p.xp += 15;
-        p.coins += 5;
-        p.score += 15;
-        const newLevel = Math.floor(p.xp / 100) + 1;
-        if (newLevel > p.level) {
-          p.level = newLevel;
-          p.health = 100;
-          io.emit('levelUp', { level: p.level, name: p.name });
-        }
-        io.to(socket.id).emit('quizResult', {
-          correct: true, xp: 15, coins: 5, damage: 0,
-          correctAnswer: correctText, health: p.health, killed: false
-        });
+        recordQuizResult(p, category, true);
+        if (p.email) checkAchievements(p.email, socket.id);
       }
     } else {
       // Wrong answer
@@ -907,11 +1335,26 @@ io.on('connection', (socket) => {
       if (p.health < 0) p.health = 0;
       io.to(socket.id).emit('quizResult', {
         correct: false, xp: 0, coins: 0, damage: 15,
-        correctAnswer: correctText, health: p.health, killed: false
+        correctAnswer: correctText, health: p.health, killed: false,
+        isChest: isChest
       });
       if (p.health <= 0) {
         io.to(socket.id).emit('dead');
         io.emit('killfeed', { text: p.name + ' foi derrotado!' });
+      }
+      if (!isChest) recordQuizResult(p, category, false);
+      else {
+        if (p.email) {
+          const rec = persistedUsers[p.email];
+          if (rec) {
+            if (!rec.quizHistory) rec.quizHistory = [];
+            rec.quizHistory.push({ category, correct: false, timestamp: Date.now(), source: 'chest' });
+            if (rec.quizHistory.length > 200) rec.quizHistory = rec.quizHistory.slice(-200);
+            if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
+            rec.stats.totalWrong = (rec.stats.totalWrong || 0) + 1;
+            saveData();
+          }
+        }
       }
     }
 
@@ -942,13 +1385,89 @@ io.on('connection', (socket) => {
       timestamp: Date.now()
     };
 
+    // Pick a random mini-lesson for this category
+    const lessons = miniLessons[totem.category] || [];
+    const miniLesson = lessons.length > 0 ? lessons[Math.floor(Math.random() * lessons.length)] : null;
+
     io.to(socket.id).emit('quizStart', {
       enemyId: null,
       totemId: totem.id,
       question: question.q,
       options: question.options,
       timeLimit: QUIZ_TIME_LIMIT / 1000,
-      category: totem.category
+      category: totem.category,
+      miniLesson: miniLesson
+    });
+  });
+
+  // ---- Chest Interaction ----
+  socket.on('chestInteract', (data) => {
+    const p = players[socket.id];
+    if (!p || p.health <= 0) return;
+    if (activeQuizzes[socket.id]) return;
+
+    const chest = chests.find(c => c.id === data.chestId);
+    if (!chest) return;
+
+    // Check distance
+    const dist = Math.hypot(p.x - chest.x, p.y - chest.y);
+    if (dist > 60) return;
+
+    // Check cooldown per player
+    const now = Date.now();
+    const lastOpened = chest.openedBy[socket.id] || 0;
+    if (now - lastOpened < chest.respawnTime) {
+      const remaining = Math.ceil((chest.respawnTime - (now - lastOpened)) / 1000);
+      socket.emit('chestCooldown', { chestId: chest.id, remaining });
+      return;
+    }
+
+    const question = getRandomQuestion(chest.category);
+    if (!question) return;
+
+    // Mark chest as opened for cooldown tracking
+    chest.openedBy[socket.id] = now;
+
+    activeQuizzes[socket.id] = {
+      enemyId: null,
+      chestId: chest.id,
+      questionIndex: question.index,
+      category: chest.category,
+      correctAnswer: question.answer,
+      timestamp: now,
+      isChest: true
+    };
+
+    socket.emit('quizStart', {
+      enemyId: null,
+      chestId: chest.id,
+      question: question.q,
+      options: question.options,
+      timeLimit: QUIZ_TIME_LIMIT / 1000,
+      category: chest.category,
+      isChest: true
+    });
+  });
+
+  // ---- Sign Interaction ----
+  socket.on('signInteract', (data) => {
+    const p = players[socket.id];
+    if (!p || p.health <= 0) return;
+
+    const sign = infoSigns.find(s => s.id === data.signId);
+    if (!sign) return;
+
+    // Check distance
+    const dist = Math.hypot(p.x - sign.x, p.y - sign.y);
+    if (dist > 50) return;
+
+    const tips = studyTips[sign.category] || [];
+    const tip = tips[sign.tipIndex % tips.length] || 'Dica: Continue estudando!';
+
+    socket.emit('signTip', {
+      signId: sign.id,
+      tip,
+      category: sign.category
     });
   });
 
@@ -1081,10 +1600,68 @@ io.on('connection', (socket) => {
     socket.emit('respawned', { player: p });
   });
 
+  // ---- Persistence socket events ----
+  socket.on('saveNotes', (data) => {
+    const p = players[socket.id];
+    if (!p || !p.email) return;
+    const rec = persistedUsers[p.email];
+    if (!rec) return;
+    const { category, content } = data;
+    if (!category) return;
+    if (!rec.notes) rec.notes = {};
+    rec.notes[category] = content || '';
+    saveData();
+    socket.emit('notesSaved', { ok: true, category });
+    checkAchievements(p.email, socket.id);
+  });
+
+  socket.on('getAchievements', () => {
+    const p = players[socket.id];
+    if (!p || !p.email) {
+      socket.emit('achievementsData', { all: ACHIEVEMENTS, unlocked: [] });
+      return;
+    }
+    const rec = persistedUsers[p.email];
+    socket.emit('achievementsData', {
+      all: ACHIEVEMENTS,
+      unlocked: (rec && rec.achievements) ? rec.achievements : []
+    });
+  });
+
+  socket.on('loadNotes', () => {
+    const p = players[socket.id];
+    if (!p || !p.email) {
+      socket.emit('notesData', { notes: {} });
+      return;
+    }
+    const rec = persistedUsers[p.email];
+    socket.emit('notesData', { notes: rec ? (rec.notes || {}) : {} });
+  });
+
+  socket.on('getProgress', () => {
+    const p = players[socket.id];
+    if (!p || !p.email) {
+      socket.emit('progressData', { profile: {}, quizHistory: [], stats: {} });
+      return;
+    }
+    const rec = persistedUsers[p.email];
+    if (!rec) {
+      socket.emit('progressData', { profile: {}, quizHistory: [], stats: {} });
+      return;
+    }
+    socket.emit('progressData', {
+      profile: rec.profile || { xp: 0, level: 1, coins: 0 },
+      quizHistory: rec.quizHistory || [],
+      stats: rec.stats || {}
+    });
+  });
+
   socket.on('disconnect', () => {
     const p = players[socket.id];
     if (p) {
       io.emit('killfeed', { text: p.name + ' saiu do jogo.' });
+      // Save progress on disconnect
+      savePlayerProgress(p);
     }
     delete players[socket.id];
     delete activeQuizzes[socket.id];

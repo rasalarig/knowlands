@@ -1,5 +1,6 @@
 node_modules/
 .env
+data/
 
 # Sprintfy agent config (auto-generated)
 .claude_settings.json

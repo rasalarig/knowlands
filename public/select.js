@@ -152,36 +152,40 @@
     ctx.clearRect(0, 0, w, h);
 
     var cx = w / 2;
-    var baseY = h * 0.62;
+    var baseY = h * 0.65;
     var bob = Math.sin(frame * 0.04) * 3;
     var breathe = Math.sin(frame * 0.03) * 1.5;
     var dy = baseY + bob;
-    var scale = 2.2;
+    var scale = 2.8; // increased scale for bigger preview
 
     // Glow under character
     ctx.fillStyle = ch.glowColor;
     ctx.beginPath();
-    ctx.ellipse(cx, baseY + 28 * scale / 2, 22 * scale / 2, 8, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, baseY + scale * 9, scale * 11, 8, 0, 0, Math.PI * 2);
     ctx.fill();
 
     // Shadow
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.beginPath();
-    ctx.ellipse(cx, baseY + 18 * scale / 2, 16 * scale / 2, 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, baseY + scale * 7, scale * 9, 4, 0, 0, Math.PI * 2);
     ctx.fill();
 
     var s = scale;
 
     // Legs
-    var legOffset = Math.sin(frame * 0.06) * 2;
+    var legOffset = Math.sin(frame * 0.06) * 3;
+    var armSwing = Math.sin(frame * 0.06) * 3;
     ctx.fillStyle = '#5d4037';
     ctx.fillRect(cx - 5 * s / 2 + legOffset, dy + 8 * s / 2, 4 * s / 2, 10 * s / 2);
     ctx.fillRect(cx + 1 * s / 2 - legOffset, dy + 8 * s / 2, 4 * s / 2, 10 * s / 2);
 
-    // Feet
+    // Boots with sole
     ctx.fillStyle = '#3e2723';
     ctx.fillRect(cx - 6 * s / 2 + legOffset, dy + 16 * s / 2, 7 * s / 2, 4 * s / 2);
     ctx.fillRect(cx + 0 * s / 2 - legOffset, dy + 16 * s / 2, 7 * s / 2, 4 * s / 2);
+    ctx.fillStyle = '#1a0d0a';
+    ctx.fillRect(cx - 6 * s / 2 + legOffset, dy + 19 * s / 2, 7 * s / 2, 1);
+    ctx.fillRect(cx + 0 * s / 2 - legOffset, dy + 19 * s / 2, 7 * s / 2, 1);
 
     // Robe body
     ctx.fillStyle = ch.robeColor;
@@ -192,6 +196,14 @@
     ctx.lineTo(cx + 12 * s / 2, dy - 2 * s / 2 + breathe);
     ctx.closePath();
     ctx.fill();
+
+    // Belt
+    ctx.fillStyle = ch.robeColor;
+    ctx.globalAlpha = 0.65;
+    ctx.fillRect(cx - 10 * s / 2, dy + 4 * s / 2, 20 * s / 2, 3 * s / 2);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = ch.hatAccent || '#ffd700';
+    ctx.fillRect(cx - 2 * s / 2, dy + 4.5 * s / 2, 4 * s / 2, 2 * s / 2);
 
     // Body highlight
     ctx.fillStyle = ch.robeHighlight;
@@ -205,6 +217,27 @@
     ctx.fill();
     ctx.globalAlpha = 1;
 
+    // Arms
+    ctx.fillStyle = ch.robeColor;
+    ctx.globalAlpha = 0.9;
+    // Left arm
+    ctx.beginPath();
+    ctx.moveTo(cx - 12 * s / 2, dy - 1 * s / 2);
+    ctx.lineTo(cx - 16 * s / 2, dy + 5 * s / 2 + armSwing);
+    ctx.lineTo(cx - 14 * s / 2, dy + 5 * s / 2 + armSwing);
+    ctx.lineTo(cx - 10 * s / 2, dy - 1 * s / 2);
+    ctx.closePath();
+    ctx.fill();
+    // Right arm
+    ctx.beginPath();
+    ctx.moveTo(cx + 10 * s / 2, dy - 1 * s / 2);
+    ctx.lineTo(cx + 13 * s / 2, dy + 5 * s / 2 - armSwing);
+    ctx.lineTo(cx + 16 * s / 2, dy + 5 * s / 2 - armSwing);
+    ctx.lineTo(cx + 12 * s / 2, dy - 1 * s / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
     // Head
     ctx.fillStyle = ch.skinColor;
     ctx.beginPath();
@@ -213,6 +246,18 @@
 
     // Draw character-specific hat
     drawHat(ctx, cx, dy, s, ch, charId, frame);
+
+    // Eyebrows
+    ctx.strokeStyle = '#5d4037';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 6.5 * s / 2, dy - 15.5 * s / 2);
+    ctx.lineTo(cx - 2.5 * s / 2, dy - 17 * s / 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx + 2.5 * s / 2, dy - 17 * s / 2);
+    ctx.lineTo(cx + 6.5 * s / 2, dy - 15.5 * s / 2);
+    ctx.stroke();
 
     // Eyes
     ctx.fillStyle = '#fff';
@@ -239,6 +284,15 @@
     ctx.fill();
     ctx.beginPath();
     ctx.arc(cx + 4.8 * s / 2, dy - 14 * s / 2, 0.7 * s / 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Blush spots
+    ctx.fillStyle = 'rgba(255,150,150,0.2)';
+    ctx.beginPath();
+    ctx.arc(cx - 7 * s / 2, dy - 11 * s / 2, 3 * s / 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + 7 * s / 2, dy - 11 * s / 2, 3 * s / 2, 0, Math.PI * 2);
     ctx.fill();
 
     // Mouth (small smile)
