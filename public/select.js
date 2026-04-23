@@ -156,7 +156,7 @@
     var bob = Math.sin(frame * 0.04) * 3;
     var breathe = Math.sin(frame * 0.03) * 1.5;
     var dy = baseY + bob;
-    var scale = 2.8; // increased scale for bigger preview
+    var scale = 2.0; // scale for character selection preview
 
     // Glow under character
     ctx.fillStyle = ch.glowColor;

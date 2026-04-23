@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -77,6 +78,13 @@ function defaultUserRecord(email, name, extraFields) {
       totalDuelsWon: 0,
       totalDuelsLost: 0,
       islandsVisited: []
+    },
+    progression: {
+      matematica: 1,
+      historia: 1,
+      ciencias: 1,
+      linguas: 1,
+      programacao: 1
     }
   }, extraFields || {});
 }
@@ -99,12 +107,12 @@ function savePlayerProgress(player) {
   saveData();
 }
 
-function recordQuizResult(player, category, correct) {
+function recordQuizResult(player, category, correct, level) {
   if (!player || !player.email) return;
   const rec = persistedUsers[player.email];
   if (!rec) return;
   if (!rec.quizHistory) rec.quizHistory = [];
-  rec.quizHistory.push({ category, correct, timestamp: Date.now() });
+  rec.quizHistory.push({ category, correct, timestamp: Date.now(), level: level || 1 });
   // Keep last 200 entries to avoid unbounded growth
   if (rec.quizHistory.length > 200) rec.quizHistory = rec.quizHistory.slice(-200);
   if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
@@ -260,69 +268,124 @@ app.get('/api/user/progress/:email', (req, res) => {
 });
 
 // ===============================================================
-//  QUIZ QUESTION BANK
+//  QUIZ QUESTION BANK (leveled: 1=Basic, 2=Intermediate, 3=Advanced)
 // ===============================================================
 const questions = {
-  matematica: [
-    { q: "Quanto e 7 x 8?", options: ["54", "56", "58", "64"], answer: 1 },
-    { q: "Raiz quadrada de 144?", options: ["10", "11", "12", "14"], answer: 2 },
-    { q: "Quanto e 15% de 200?", options: ["25", "30", "35", "40"], answer: 1 },
-    { q: "Qual e o valor de pi aproximado?", options: ["3.14", "2.71", "1.61", "3.41"], answer: 0 },
-    { q: "2 ao cubo e igual a?", options: ["6", "8", "9", "12"], answer: 1 },
-    { q: "Quanto e 144 / 12?", options: ["10", "11", "12", "13"], answer: 2 },
-    { q: "Qual e o MMC de 4 e 6?", options: ["12", "24", "6", "8"], answer: 0 },
-    { q: "Quanto e 3! (fatorial)?", options: ["3", "6", "9", "12"], answer: 1 },
-    { q: "Area de um quadrado de lado 5?", options: ["20", "25", "30", "10"], answer: 1 },
-    { q: "Soma dos angulos de um triangulo?", options: ["90 graus", "180 graus", "270 graus", "360 graus"], answer: 1 }
-  ],
-  historia: [
-    { q: "Em que ano o Brasil foi descoberto?", options: ["1498", "1500", "1502", "1510"], answer: 1 },
-    { q: "Quem proclamou a independencia do Brasil?", options: ["Tiradentes", "D. Pedro I", "D. Pedro II", "Getulio"], answer: 1 },
-    { q: "Revolucao Francesa comecou em?", options: ["1776", "1789", "1799", "1804"], answer: 1 },
-    { q: "Primeira Guerra Mundial comecou em?", options: ["1912", "1914", "1916", "1918"], answer: 1 },
-    { q: "Quem pintou a Mona Lisa?", options: ["Michelangelo", "Da Vinci", "Rafael", "Donatello"], answer: 1 },
-    { q: "Egito Antigo ficava em qual continente?", options: ["Asia", "Europa", "Africa", "America"], answer: 2 },
-    { q: "Quem foi o primeiro presidente do Brasil?", options: ["Getulio", "Deodoro", "Prudente", "Floriano"], answer: 1 },
-    { q: "A escravidao acabou no Brasil em?", options: ["1822", "1850", "1888", "1900"], answer: 2 },
-    { q: "Imperio Romano caiu em que seculo?", options: ["III", "IV", "V", "VI"], answer: 2 },
-    { q: "Guerra Fria foi entre?", options: ["EUA e China", "EUA e URSS", "EUA e Japao", "EUA e UK"], answer: 1 }
-  ],
-  ciencias: [
-    { q: "Qual e a formula da agua?", options: ["CO2", "H2O", "O2", "NaCl"], answer: 1 },
-    { q: "Velocidade da luz (km/s)?", options: ["150.000", "200.000", "300.000", "400.000"], answer: 2 },
-    { q: "Quantos ossos tem o corpo humano?", options: ["106", "156", "206", "256"], answer: 2 },
-    { q: "Qual planeta e o maior do sistema solar?", options: ["Saturno", "Jupiter", "Netuno", "Urano"], answer: 1 },
-    { q: "DNA significa?", options: ["Acido desoxirribonucleico", "Acido dinucleico", "Acido dioxirribo", "Adenina nucleica"], answer: 0 },
-    { q: "Qual e o elemento mais abundante no universo?", options: ["Oxigenio", "Carbono", "Hidrogenio", "Helio"], answer: 2 },
-    { q: "Fotossintese produz?", options: ["CO2", "Oxigenio", "Nitrogenio", "Metano"], answer: 1 },
-    { q: "Unidade de forca no SI?", options: ["Watt", "Joule", "Newton", "Pascal"], answer: 2 },
-    { q: "Quantos cromossomos tem um humano?", options: ["23", "44", "46", "48"], answer: 2 },
-    { q: "Qual orgao produz insulina?", options: ["Figado", "Pancreas", "Rim", "Coracao"], answer: 1 }
-  ],
-  linguas: [
-    { q: "'Hello' em japones?", options: ["Annyeong", "Konnichiwa", "Ni hao", "Sawadee"], answer: 1 },
-    { q: "Qual idioma tem mais falantes nativos?", options: ["Ingles", "Espanhol", "Mandarim", "Hindi"], answer: 2 },
-    { q: "'Obrigado' em frances?", options: ["Grazie", "Merci", "Danke", "Gracias"], answer: 1 },
-    { q: "Quantas letras tem o alfabeto ingles?", options: ["24", "25", "26", "27"], answer: 2 },
-    { q: "'Amor' em italiano?", options: ["Amore", "Amour", "Liebe", "Love"], answer: 0 },
-    { q: "Qual lingua usa o alfabeto cirilico?", options: ["Grego", "Russo", "Arabe", "Japones"], answer: 1 },
-    { q: "'Goodbye' em espanhol?", options: ["Au revoir", "Adios", "Tschuss", "Arrivederci"], answer: 1 },
-    { q: "Plural de 'child' em ingles?", options: ["Childs", "Childrens", "Children", "Childes"], answer: 2 },
-    { q: "O esperanto foi criado por?", options: ["Chomsky", "Zamenhof", "Tolkien", "Saussure"], answer: 1 },
-    { q: "'Bom dia' em alemao?", options: ["Bonjour", "Guten Morgen", "Buenos dias", "Buongiorno"], answer: 1 }
-  ],
-  programacao: [
-    { q: "O que HTML significa?", options: ["HyperText Markup Language", "High Tech ML", "HyperTransfer ML", "Home Tool ML"], answer: 0 },
-    { q: "Qual NAO e linguagem de programacao?", options: ["Python", "Java", "HTML", "C++"], answer: 2 },
-    { q: "console.log() e de qual linguagem?", options: ["Python", "Java", "JavaScript", "C#"], answer: 2 },
-    { q: "O que CSS controla?", options: ["Logica", "Estilo visual", "Banco de dados", "Servidor"], answer: 1 },
-    { q: "Git e usado para?", options: ["Design", "Versionamento", "Compilacao", "Teste"], answer: 1 },
-    { q: "Qual e o operador de igualdade estrita em JS?", options: ["==", "===", "!=", ">="], answer: 1 },
-    { q: "Python e tipagem?", options: ["Estatica", "Dinamica", "Nenhuma", "Fixa"], answer: 1 },
-    { q: "SQL e usado para?", options: ["Estilo", "Banco de dados", "Animacao", "Rede"], answer: 1 },
-    { q: "O que e um array?", options: ["Uma funcao", "Uma lista ordenada", "Um estilo", "Um servidor"], answer: 1 },
-    { q: "Localhost geralmente usa porta?", options: ["80", "443", "3000", "8080"], answer: 2 }
-  ]
+  matematica: {
+    1: [ // Nivel Basico
+      { q: "Quanto e 2 + 3?", options: ["4", "5", "6", "7"], answer: 1 },
+      { q: "Quanto e 5 x 2?", options: ["8", "10", "12", "15"], answer: 1 },
+      { q: "Quanto e 10 - 4?", options: ["4", "5", "6", "7"], answer: 2 },
+      { q: "Quanto e 8 / 2?", options: ["2", "3", "4", "5"], answer: 2 },
+      { q: "Qual numero vem depois do 9?", options: ["8", "10", "11", "12"], answer: 1 },
+    ],
+    2: [ // Nivel Intermediario
+      { q: "Quanto e 7 x 8?", options: ["54", "56", "58", "64"], answer: 1 },
+      { q: "Raiz quadrada de 144?", options: ["10", "11", "12", "14"], answer: 2 },
+      { q: "Quanto e 15% de 200?", options: ["25", "30", "35", "40"], answer: 1 },
+      { q: "Quanto e 144 / 12?", options: ["10", "11", "12", "13"], answer: 2 },
+      { q: "Quanto e 3! (fatorial)?", options: ["3", "6", "9", "12"], answer: 1 },
+    ],
+    3: [ // Nivel Avancado
+      { q: "Qual e o valor de pi aproximado?", options: ["3.14", "2.71", "1.61", "3.41"], answer: 0 },
+      { q: "2 ao cubo e igual a?", options: ["6", "8", "9", "12"], answer: 1 },
+      { q: "Qual e o MMC de 4 e 6?", options: ["12", "24", "6", "8"], answer: 0 },
+      { q: "Area de um quadrado de lado 5?", options: ["20", "25", "30", "10"], answer: 1 },
+      { q: "Soma dos angulos de um triangulo?", options: ["90 graus", "180 graus", "270 graus", "360 graus"], answer: 1 },
+    ]
+  },
+  historia: {
+    1: [
+      { q: "Em que ano o Brasil foi descoberto?", options: ["1498", "1500", "1502", "1510"], answer: 1 },
+      { q: "Quem pintou a Mona Lisa?", options: ["Michelangelo", "Da Vinci", "Rafael", "Donatello"], answer: 1 },
+      { q: "Egito Antigo ficava em qual continente?", options: ["Asia", "Europa", "Africa", "America"], answer: 2 },
+      { q: "Quem proclamou a independencia do Brasil?", options: ["Tiradentes", "D. Pedro I", "D. Pedro II", "Getulio"], answer: 1 },
+      { q: "A escravidao acabou no Brasil em?", options: ["1822", "1850", "1888", "1900"], answer: 2 },
+    ],
+    2: [
+      { q: "Revolucao Francesa comecou em?", options: ["1776", "1789", "1799", "1804"], answer: 1 },
+      { q: "Primeira Guerra Mundial comecou em?", options: ["1912", "1914", "1916", "1918"], answer: 1 },
+      { q: "Quem foi o primeiro presidente do Brasil?", options: ["Getulio", "Deodoro", "Prudente", "Floriano"], answer: 1 },
+      { q: "Imperio Romano caiu em que seculo?", options: ["III", "IV", "V", "VI"], answer: 2 },
+      { q: "Guerra Fria foi entre?", options: ["EUA e China", "EUA e URSS", "EUA e Japao", "EUA e UK"], answer: 1 },
+    ],
+    3: [
+      { q: "Tratado de Tordesilhas foi em?", options: ["1492", "1494", "1500", "1502"], answer: 1 },
+      { q: "Quem liderou a Revolucao Russa?", options: ["Stalin", "Lenin", "Marx", "Trotsky"], answer: 1 },
+      { q: "Muro de Berlim caiu em?", options: ["1985", "1987", "1989", "1991"], answer: 2 },
+      { q: "Revolucao Industrial comecou em qual pais?", options: ["Franca", "Alemanha", "Inglaterra", "EUA"], answer: 2 },
+      { q: "Qual civilizacao inventou a escrita?", options: ["Egipcia", "Grega", "Sumerios", "Romana"], answer: 2 },
+    ]
+  },
+  ciencias: {
+    1: [
+      { q: "Qual e a formula da agua?", options: ["CO2", "H2O", "O2", "NaCl"], answer: 1 },
+      { q: "Qual planeta e o maior do sistema solar?", options: ["Saturno", "Jupiter", "Netuno", "Urano"], answer: 1 },
+      { q: "Fotossintese produz?", options: ["CO2", "Oxigenio", "Nitrogenio", "Metano"], answer: 1 },
+      { q: "Quantos ossos tem o corpo humano?", options: ["106", "156", "206", "256"], answer: 2 },
+      { q: "Qual orgao produz insulina?", options: ["Figado", "Pancreas", "Rim", "Coracao"], answer: 1 },
+    ],
+    2: [
+      { q: "Velocidade da luz (km/s)?", options: ["150.000", "200.000", "300.000", "400.000"], answer: 2 },
+      { q: "DNA significa?", options: ["Acido desoxirribonucleico", "Acido dinucleico", "Acido dioxirribo", "Adenina nucleica"], answer: 0 },
+      { q: "Qual e o elemento mais abundante no universo?", options: ["Oxigenio", "Carbono", "Hidrogenio", "Helio"], answer: 2 },
+      { q: "Unidade de forca no SI?", options: ["Watt", "Joule", "Newton", "Pascal"], answer: 2 },
+      { q: "Quantos cromossomos tem um humano?", options: ["23", "44", "46", "48"], answer: 2 },
+    ],
+    3: [
+      { q: "Qual particula tem carga negativa?", options: ["Proton", "Neutron", "Electron", "Foton"], answer: 2 },
+      { q: "Lei da gravidade e de?", options: ["Einstein", "Newton", "Galileu", "Kepler"], answer: 1 },
+      { q: "Qual e o gas nobre mais leve?", options: ["Neonio", "Helio", "Argonio", "Xenonio"], answer: 1 },
+      { q: "Mitocondria e responsavel por?", options: ["Digestao", "Energia", "Protecao", "Reproducao"], answer: 1 },
+      { q: "Tabela periodica foi criada por?", options: ["Bohr", "Lavoisier", "Mendeleev", "Dalton"], answer: 2 },
+    ]
+  },
+  linguas: {
+    1: [
+      { q: "'Hello' em japones?", options: ["Annyeong", "Konnichiwa", "Ni hao", "Sawadee"], answer: 1 },
+      { q: "'Obrigado' em frances?", options: ["Grazie", "Merci", "Danke", "Gracias"], answer: 1 },
+      { q: "'Amor' em italiano?", options: ["Amore", "Amour", "Liebe", "Love"], answer: 0 },
+      { q: "'Bom dia' em alemao?", options: ["Bonjour", "Guten Morgen", "Buenos dias", "Buongiorno"], answer: 1 },
+      { q: "'Goodbye' em espanhol?", options: ["Au revoir", "Adios", "Tschuss", "Arrivederci"], answer: 1 },
+    ],
+    2: [
+      { q: "Qual idioma tem mais falantes nativos?", options: ["Ingles", "Espanhol", "Mandarim", "Hindi"], answer: 2 },
+      { q: "Quantas letras tem o alfabeto ingles?", options: ["24", "25", "26", "27"], answer: 2 },
+      { q: "Qual lingua usa o alfabeto cirilico?", options: ["Grego", "Russo", "Arabe", "Japones"], answer: 1 },
+      { q: "Plural de 'child' em ingles?", options: ["Childs", "Childrens", "Children", "Childes"], answer: 2 },
+      { q: "O esperanto foi criado por?", options: ["Chomsky", "Zamenhof", "Tolkien", "Saussure"], answer: 1 },
+    ],
+    3: [
+      { q: "Quantos tons tem o mandarim?", options: ["2", "3", "4", "5"], answer: 2 },
+      { q: "Qual familia linguistica do portugues?", options: ["Germanica", "Romanica", "Eslava", "Celtica"], answer: 1 },
+      { q: "Hiragana e Katakana sao de qual lingua?", options: ["Chines", "Coreano", "Japones", "Tailandes"], answer: 2 },
+      { q: "Lingua mais falada na Africa?", options: ["Arabe", "Suaili", "Frances", "Ingles"], answer: 0 },
+      { q: "Qual lingua tem mais palavras?", options: ["Chines", "Ingles", "Arabe", "Espanhol"], answer: 1 },
+    ]
+  },
+  programacao: {
+    1: [
+      { q: "O que HTML significa?", options: ["HyperText Markup Language", "High Tech ML", "HyperTransfer ML", "Home Tool ML"], answer: 0 },
+      { q: "Qual NAO e linguagem de programacao?", options: ["Python", "Java", "HTML", "C++"], answer: 2 },
+      { q: "O que CSS controla?", options: ["Logica", "Estilo visual", "Banco de dados", "Servidor"], answer: 1 },
+      { q: "Git e usado para?", options: ["Design", "Versionamento", "Compilacao", "Teste"], answer: 1 },
+      { q: "O que e um array?", options: ["Uma funcao", "Uma lista ordenada", "Um estilo", "Um servidor"], answer: 1 },
+    ],
+    2: [
+      { q: "console.log() e de qual linguagem?", options: ["Python", "Java", "JavaScript", "C#"], answer: 2 },
+      { q: "Qual e o operador de igualdade estrita em JS?", options: ["==", "===", "!=", ">="], answer: 1 },
+      { q: "Python e tipagem?", options: ["Estatica", "Dinamica", "Nenhuma", "Fixa"], answer: 1 },
+      { q: "SQL e usado para?", options: ["Estilo", "Banco de dados", "Animacao", "Rede"], answer: 1 },
+      { q: "Localhost geralmente usa porta?", options: ["80", "443", "3000", "8080"], answer: 2 },
+    ],
+    3: [
+      { q: "O que e recursao?", options: ["Loop infinito", "Funcao que chama a si mesma", "Tipo de variavel", "Metodo de ordenacao"], answer: 1 },
+      { q: "Big O de busca binaria?", options: ["O(n)", "O(log n)", "O(n2)", "O(1)"], answer: 1 },
+      { q: "REST usa qual protocolo?", options: ["FTP", "SSH", "HTTP", "SMTP"], answer: 2 },
+      { q: "O que e uma API?", options: ["Um banco de dados", "Uma interface de programacao", "Um compilador", "Um sistema operacional"], answer: 1 },
+      { q: "Docker usa qual conceito?", options: ["Maquinas virtuais", "Containers", "Threads", "Sockets"], answer: 1 },
+    ]
+  }
 };
 
 // ===============================================================
@@ -419,8 +482,8 @@ function checkAchievements(email, socketId) {
 // ===============================================================
 //  GAME CONSTANTS
 // ===============================================================
-const MAP_W = 4000;
-const MAP_H = 4000;
+const MAP_W = 6000;
+const MAP_H = 6000;
 
 const PLAYER_COLORS = [
   '#00e5ff', '#76ff03', '#ffea00', '#ff6d00',
@@ -438,75 +501,80 @@ function nextColor() {
 //  ISLAND DEFINITIONS
 // ===============================================================
 const islands = [
-  { id: 'matematica', name: 'Ilha da Matematica', x: 700, y: 700, rx: 380, ry: 320, category: 'matematica', theme: 'blue',
+  { id: 'matematica', name: 'Ilha da Matematica', x: 3000, y: 1200, rx: 608, ry: 512, category: 'matematica', theme: 'blue',
     points: [
-      {x: -350, y: -50}, {x: -310, y: -190}, {x: -200, y: -280}, {x: -60, y: -310},
-      {x: 80, y: -290}, {x: 200, y: -260}, {x: 310, y: -200}, {x: 360, y: -80},
-      {x: 370, y: 50}, {x: 340, y: 160}, {x: 280, y: 240}, {x: 160, y: 300},
-      {x: 30, y: 280}, {x: -100, y: 310}, {x: -220, y: 260}, {x: -330, y: 170},
-      {x: -370, y: 60}
+      {x: -560, y: -80}, {x: -496, y: -304}, {x: -320, y: -448}, {x: -96, y: -496},
+      {x: 128, y: -464}, {x: 320, y: -416}, {x: 496, y: -320}, {x: 576, y: -128},
+      {x: 592, y: 80}, {x: 544, y: 256}, {x: 448, y: 384}, {x: 256, y: 480},
+      {x: 48, y: 448}, {x: -160, y: 496}, {x: -352, y: 416}, {x: -528, y: 272},
+      {x: -592, y: 96}
     ]
   },
-  { id: 'historia', name: 'Ilha da Historia', x: 3300, y: 700, rx: 380, ry: 320, category: 'historia', theme: 'brown',
+  { id: 'historia', name: 'Ilha da Historia', x: 4712, y: 2444, rx: 608, ry: 512, category: 'historia', theme: 'brown',
     points: [
-      {x: -340, y: -100}, {x: -280, y: -240}, {x: -140, y: -300}, {x: 20, y: -280},
-      {x: 150, y: -310}, {x: 280, y: -250}, {x: 360, y: -130}, {x: 370, y: 20},
-      {x: 330, y: 140}, {x: 250, y: 250}, {x: 120, y: 290}, {x: -30, y: 310},
-      {x: -180, y: 270}, {x: -300, y: 180}, {x: -370, y: 50}, {x: -360, y: -30}
+      {x: -544, y: -160}, {x: -448, y: -384}, {x: -224, y: -480}, {x: 32, y: -448},
+      {x: 240, y: -496}, {x: 448, y: -400}, {x: 576, y: -208}, {x: 592, y: 32},
+      {x: 528, y: 224}, {x: 400, y: 400}, {x: 192, y: 464}, {x: -48, y: 496},
+      {x: -288, y: 432}, {x: -480, y: 288}, {x: -592, y: 80}, {x: -576, y: -48}
     ]
   },
-  { id: 'ciencias', name: 'Ilha das Ciencias', x: 2000, y: 1600, rx: 400, ry: 340, category: 'ciencias', theme: 'green',
+  { id: 'ciencias', name: 'Ilha das Ciencias', x: 1288, y: 2444, rx: 640, ry: 544, category: 'ciencias', theme: 'green',
     points: [
-      {x: -380, y: -30}, {x: -340, y: -180}, {x: -240, y: -290}, {x: -90, y: -330},
-      {x: 60, y: -310}, {x: 180, y: -340}, {x: 300, y: -270}, {x: 380, y: -140},
-      {x: 390, y: 10}, {x: 360, y: 150}, {x: 260, y: 270}, {x: 130, y: 320},
-      {x: -20, y: 340}, {x: -160, y: 300}, {x: -290, y: 220}, {x: -380, y: 110},
-      {x: -400, y: -10}
+      {x: -608, y: -48}, {x: -544, y: -288}, {x: -384, y: -464}, {x: -144, y: -528},
+      {x: 96, y: -496}, {x: 288, y: -544}, {x: 480, y: -432}, {x: 608, y: -224},
+      {x: 624, y: 16}, {x: 576, y: 240}, {x: 416, y: 432}, {x: 208, y: 512},
+      {x: -32, y: 544}, {x: -256, y: 480}, {x: -464, y: 352}, {x: -608, y: 176},
+      {x: -640, y: -16}
     ]
   },
-  { id: 'linguas', name: 'Ilha das Linguas', x: 700, y: 3300, rx: 380, ry: 320, category: 'linguas', theme: 'purple',
+  { id: 'linguas', name: 'Ilha das Linguas', x: 1942, y: 4456, rx: 608, ry: 512, category: 'linguas', theme: 'purple',
     points: [
-      {x: -310, y: -140}, {x: -220, y: -270}, {x: -70, y: -310}, {x: 90, y: -300},
-      {x: 230, y: -240}, {x: 340, y: -140}, {x: 370, y: 0}, {x: 350, y: 130},
-      {x: 280, y: 230}, {x: 170, y: 280}, {x: 40, y: 320}, {x: -120, y: 290},
-      {x: -250, y: 220}, {x: -350, y: 100}, {x: -370, y: -30}
+      {x: -496, y: -224}, {x: -352, y: -432}, {x: -112, y: -496}, {x: 144, y: -480},
+      {x: 368, y: -384}, {x: 544, y: -224}, {x: 592, y: 0}, {x: 560, y: 208},
+      {x: 448, y: 368}, {x: 272, y: 448}, {x: 64, y: 512}, {x: -192, y: 464},
+      {x: -400, y: 352}, {x: -560, y: 160}, {x: -592, y: -48}
     ]
   },
-  { id: 'programacao', name: 'Ilha da Programacao', x: 3300, y: 3300, rx: 380, ry: 320, category: 'programacao', theme: 'neon',
+  { id: 'programacao', name: 'Ilha da Programacao', x: 4058, y: 4456, rx: 608, ry: 512, category: 'programacao', theme: 'neon',
     points: [
-      {x: -360, y: -80}, {x: -300, y: -210}, {x: -170, y: -290}, {x: -20, y: -320},
-      {x: 130, y: -280}, {x: 260, y: -300}, {x: 350, y: -190}, {x: 380, y: -50},
-      {x: 360, y: 80}, {x: 300, y: 190}, {x: 180, y: 270}, {x: 40, y: 310},
-      {x: -110, y: 290}, {x: -240, y: 230}, {x: -340, y: 120}, {x: -380, y: -10}
+      {x: -576, y: -128}, {x: -480, y: -336}, {x: -272, y: -464}, {x: -32, y: -512},
+      {x: 208, y: -448}, {x: 416, y: -480}, {x: 560, y: -304}, {x: 608, y: -80},
+      {x: 576, y: 128}, {x: 480, y: 304}, {x: 288, y: 432}, {x: 64, y: 496},
+      {x: -176, y: 464}, {x: -384, y: 368}, {x: -544, y: 192}, {x: -608, y: -16}
     ]
   },
-  { id: 'central', name: 'Ilha Central', x: 2000, y: 2800, rx: 450, ry: 380, category: null, theme: 'gold',
+  { id: 'central', name: 'Ilha Central', x: 3000, y: 3000, rx: 720, ry: 608, category: null, theme: 'gold',
     points: [
-      {x: -430, y: -60}, {x: -390, y: -200}, {x: -280, y: -320}, {x: -130, y: -370},
-      {x: 30, y: -360}, {x: 170, y: -340}, {x: 310, y: -280}, {x: 420, y: -160},
-      {x: 440, y: -20}, {x: 430, y: 120}, {x: 370, y: 250}, {x: 250, y: 340},
-      {x: 100, y: 370}, {x: -50, y: 380}, {x: -200, y: 340}, {x: -330, y: 250},
-      {x: -420, y: 130}, {x: -450, y: 0}
+      {x: -688, y: -96}, {x: -624, y: -320}, {x: -448, y: -512}, {x: -208, y: -592},
+      {x: 48, y: -576}, {x: 272, y: -544}, {x: 496, y: -448}, {x: 672, y: -256},
+      {x: 704, y: -32}, {x: 688, y: 192}, {x: 592, y: 400}, {x: 400, y: 544},
+      {x: 160, y: 592}, {x: -80, y: 608}, {x: -320, y: 544}, {x: -528, y: 400},
+      {x: -672, y: 208}, {x: -720, y: 0}
     ]
   }
 ];
 
-// Bridges connecting islands
+// Bridges connecting islands - star/pentagon pattern
 const bridges = [
-  { from: 'matematica', to: 'ciencias' },
-  { from: 'historia', to: 'ciencias' },
-  { from: 'ciencias', to: 'central' },
-  { from: 'linguas', to: 'central' },
+  // Pentagon outer ring
+  { from: 'matematica', to: 'historia' },
+  { from: 'historia', to: 'programacao' },
+  { from: 'programacao', to: 'linguas' },
+  { from: 'linguas', to: 'ciencias' },
+  { from: 'ciencias', to: 'matematica' },
+  // Star spokes to center
+  { from: 'matematica', to: 'central' },
+  { from: 'historia', to: 'central' },
   { from: 'programacao', to: 'central' },
-  { from: 'matematica', to: 'linguas' },
-  { from: 'historia', to: 'programacao' }
+  { from: 'linguas', to: 'central' },
+  { from: 'ciencias', to: 'central' }
 ];
 
-// Quiz totems per island
+// Quiz totems per island (zone-based placement)
 const totems = [];
 islands.forEach(isl => {
   if (!isl.category) {
-    // Central island has one totem of each category
+    // Central island: 5 totems, one per category
     const cats = ['matematica', 'historia', 'ciencias', 'linguas', 'programacao'];
     cats.forEach((cat, i) => {
       const angle = (i / cats.length) * Math.PI * 2;
@@ -515,42 +583,89 @@ islands.forEach(isl => {
         x: isl.x + Math.cos(angle) * isl.rx * 0.5,
         y: isl.y + Math.sin(angle) * isl.ry * 0.5,
         category: cat,
-        island: isl.id
+        island: isl.id,
+        zone: 1
       });
     });
   } else {
-    // 3 totems per themed island
-    for (let i = 0; i < 3; i++) {
-      const angle = (i / 3) * Math.PI * 2 + 0.3;
+    // Zone 1 - outer ring (basic)
+    for (let i = 0; i < 2; i++) {
+      const angle = (i / 2) * Math.PI * 2 + 0.3;
       totems.push({
-        id: 'totem_' + isl.id + '_' + i,
+        id: 'totem_' + isl.id + '_z1_' + i,
+        x: isl.x + Math.cos(angle) * isl.rx * 0.7,
+        y: isl.y + Math.sin(angle) * isl.ry * 0.7,
+        category: isl.category,
+        island: isl.id,
+        zone: 1
+      });
+    }
+    // Zone 2 - middle ring (intermediate)
+    for (let i = 0; i < 2; i++) {
+      const angle = (i / 2) * Math.PI * 2 + 1.2;
+      totems.push({
+        id: 'totem_' + isl.id + '_z2_' + i,
         x: isl.x + Math.cos(angle) * isl.rx * 0.45,
         y: isl.y + Math.sin(angle) * isl.ry * 0.45,
         category: isl.category,
-        island: isl.id
+        island: isl.id,
+        zone: 2
       });
     }
+    // Zone 3 - center (advanced)
+    totems.push({
+      id: 'totem_' + isl.id + '_z3_0',
+      x: isl.x,
+      y: isl.y,
+      category: isl.category,
+      island: isl.id,
+      zone: 3
+    });
   }
 });
 
 // ===============================================================
-//  TREASURE CHESTS
+//  TREASURE CHESTS (zone-based: 1 per zone)
 // ===============================================================
 const chests = [];
 islands.forEach(isl => {
   if (!isl.category) return; // skip central island
-  for (let i = 0; i < 3; i++) {
-    const angle = (i / 3) * Math.PI * 2 + 1.2; // offset from totems
-    chests.push({
-      id: 'chest_' + isl.id + '_' + i,
-      x: isl.x + Math.cos(angle) * isl.rx * 0.65,
-      y: isl.y + Math.sin(angle) * isl.ry * 0.65,
-      category: isl.category,
-      island: isl.id,
-      openedBy: {}, // socketId -> timestamp (cooldown tracking)
-      respawnTime: 60000 // 60 seconds cooldown per player
-    });
-  }
+  // Zone 1 chest (outer)
+  const z1Angle = 0.9;
+  chests.push({
+    id: 'chest_' + isl.id + '_z1',
+    x: isl.x + Math.cos(z1Angle) * isl.rx * 0.65,
+    y: isl.y + Math.sin(z1Angle) * isl.ry * 0.65,
+    category: isl.category,
+    island: isl.id,
+    zone: 1,
+    openedBy: {},
+    respawnTime: 60000
+  });
+  // Zone 2 chest (middle)
+  const z2Angle = 2.5;
+  chests.push({
+    id: 'chest_' + isl.id + '_z2',
+    x: isl.x + Math.cos(z2Angle) * isl.rx * 0.4,
+    y: isl.y + Math.sin(z2Angle) * isl.ry * 0.4,
+    category: isl.category,
+    island: isl.id,
+    zone: 2,
+    openedBy: {},
+    respawnTime: 60000
+  });
+  // Zone 3 chest (inner, near center)
+  const z3Angle = 4.1;
+  chests.push({
+    id: 'chest_' + isl.id + '_z3',
+    x: isl.x + Math.cos(z3Angle) * isl.rx * 0.15,
+    y: isl.y + Math.sin(z3Angle) * isl.ry * 0.15,
+    category: isl.category,
+    island: isl.id,
+    zone: 3,
+    openedBy: {},
+    respawnTime: 60000
+  });
 });
 
 // ===============================================================
@@ -587,17 +702,47 @@ const studyTips = {
 const infoSigns = [];
 islands.forEach(isl => {
   if (!isl.category) return;
-  for (let i = 0; i < 2; i++) {
-    const angle = (i / 2) * Math.PI * 2 + 2.0;
-    infoSigns.push({
-      id: 'sign_' + isl.id + '_' + i,
-      x: isl.x + Math.cos(angle) * isl.rx * 0.4,
-      y: isl.y + Math.sin(angle) * isl.ry * 0.4,
-      category: isl.category,
-      island: isl.id,
-      tipIndex: i
-    });
-  }
+  // Zone 1 sign (outer)
+  const s1Angle = 2.0;
+  infoSigns.push({
+    id: 'sign_' + isl.id + '_z1',
+    x: isl.x + Math.cos(s1Angle) * isl.rx * 0.65,
+    y: isl.y + Math.sin(s1Angle) * isl.ry * 0.65,
+    category: isl.category,
+    island: isl.id,
+    zone: 1,
+    tipIndex: 0
+  });
+  // Zone 2 sign (middle)
+  const s2Angle = 3.6;
+  infoSigns.push({
+    id: 'sign_' + isl.id + '_z2',
+    x: isl.x + Math.cos(s2Angle) * isl.rx * 0.38,
+    y: isl.y + Math.sin(s2Angle) * isl.ry * 0.38,
+    category: isl.category,
+    island: isl.id,
+    zone: 2,
+    tipIndex: 1
+  });
+});
+
+// ===============================================================
+//  TELEPORT PORTALS (on central island, linking to subject islands)
+// ===============================================================
+const portals = [];
+const portalCategories = ['matematica', 'historia', 'ciencias', 'linguas', 'programacao'];
+portalCategories.forEach((cat, i) => {
+  const angle = (i / portalCategories.length) * Math.PI * 2 - Math.PI / 2;
+  const targetIsland = islands.find(isl => isl.id === cat);
+  portals.push({
+    id: 'portal_' + cat,
+    x: islands.find(isl => isl.id === 'central').x + Math.cos(angle) * 250,
+    y: islands.find(isl => isl.id === 'central').y + Math.sin(angle) * 250,
+    category: cat,
+    targetX: targetIsland.x,
+    targetY: targetIsland.y,
+    label: targetIsland.name
+  });
 });
 
 // ===============================================================
@@ -700,7 +845,7 @@ function isOnBridge(x, y) {
 
     // Distance from bridge line
     const perpDist = Math.abs(px * (-ny) + py * nx);
-    if (perpDist < 30) return true; // bridge width
+    if (perpDist < 40) return true; // bridge width
   }
   return false;
 }
@@ -729,11 +874,37 @@ function randomSpawnOnIsland() {
   };
 }
 
-function getRandomQuestion(category) {
+function getRandomQuestion(category, level) {
+  level = level || 1;
   const pool = questions[category];
-  if (!pool || pool.length === 0) return null;
-  const idx = Math.floor(Math.random() * pool.length);
-  return { index: idx, ...pool[idx] };
+  if (!pool) return null;
+  const levelPool = pool[level];
+  if (!levelPool || levelPool.length === 0) return null;
+  const idx = Math.floor(Math.random() * levelPool.length);
+  return { index: idx, level: level, ...levelPool[idx] };
+}
+
+function checkProgression(email, category) {
+  const userData = getUserData(email);
+  if (!userData || !category) return;
+  if (!userData.progression) {
+    userData.progression = { matematica: 1, historia: 1, ciencias: 1, linguas: 1, programacao: 1 };
+  }
+  const prog = userData.progression;
+  const currentLevel = prog[category] || 1;
+  if (currentLevel >= 3) return null; // already maxed
+
+  // Count correct answers at current level for this category
+  const correctAtLevel = (userData.quizHistory || []).filter(
+    q => q.category === category && q.correct && q.level === currentLevel
+  ).length;
+
+  if (correctAtLevel >= 3) {
+    prog[category] = currentLevel + 1;
+    updateUserData(email, { progression: prog });
+    return currentLevel + 1; // return new level
+  }
+  return null;
 }
 
 function getCategoryForEnemy(enemy) {
@@ -946,7 +1117,17 @@ function gameTick() {
       // Collision with player - deal damage
       // Don't damage players who are in a quiz
       if (activeQuizzes[nearPlayer.id]) continue;
-      if (dist < e.size + 24) {
+      // Don't damage players who are in a duel
+      let inDuel = false;
+      for (const did in activeDuels) {
+        const d = activeDuels[did];
+        if (d.challengerId === nearPlayer.id || d.targetId === nearPlayer.id) {
+          inDuel = true;
+          break;
+        }
+      }
+      if (inDuel) continue;
+      if (dist < e.size + 18) {
         nearPlayer.health -= 5;
         if (nearPlayer.health < 0) nearPlayer.health = 0;
         io.to(nearPlayer.id).emit('damage', { health: nearPlayer.health });
@@ -1004,12 +1185,17 @@ function gameTick() {
         const shooter = players[b.ownerId];
         if (shooter && !activeQuizzes[b.ownerId]) {
           const category = getCategoryForEnemy(e);
-          const question = getRandomQuestion(category);
+          const shooterEmail = shooter.email;
+          const shooterData = shooterEmail ? getUserData(shooterEmail) : null;
+          const shooterProg = shooterData && shooterData.progression ? shooterData.progression : {};
+          const qLevel = shooterProg[category] || 1;
+          const question = getRandomQuestion(category, qLevel);
           if (question) {
             activeQuizzes[b.ownerId] = {
               enemyId: eid,
               questionIndex: question.index,
               category: category,
+              level: question.level,
               correctAnswer: question.answer,
               timestamp: now
             };
@@ -1018,7 +1204,8 @@ function gameTick() {
               question: question.q,
               options: question.options,
               timeLimit: QUIZ_TIME_LIMIT / 1000,
-              category: category
+              category: category,
+              level: question.level
             });
           }
         }
@@ -1043,8 +1230,10 @@ function gameTick() {
         if (player.health < 0) player.health = 0;
         const correctIdx = quiz.correctAnswer;
         const category = quiz.category;
+        const qLvl = quiz.level || 1;
         const pool = questions[category];
-        const correctText = pool && pool[quiz.questionIndex] ? pool[quiz.questionIndex].options[correctIdx] : '';
+        const levelPool = pool ? pool[qLvl] : null;
+        const correctText = levelPool && levelPool[quiz.questionIndex] ? levelPool[quiz.questionIndex].options[correctIdx] : '';
         io.to(sid).emit('quizResult', {
           correct: false,
           xp: 0,
@@ -1147,12 +1336,14 @@ io.on('connection', (socket) => {
       islands,
       bridges,
       totems,
-      chests: chests.map(c => ({ id: c.id, x: c.x, y: c.y, category: c.category, island: c.island })),
+      chests: chests.map(c => ({ id: c.id, x: c.x, y: c.y, category: c.category, island: c.island, zone: c.zone || 1 })),
       infoSigns,
+      portals,
       mapW: MAP_W,
       mapH: MAP_H,
       allAchievements: ACHIEVEMENTS,
-      unlockedAchievements: (rec && rec.achievements) ? rec.achievements : []
+      unlockedAchievements: (rec && rec.achievements) ? rec.achievements : [],
+      progression: (rec && rec.progression) ? rec.progression : { matematica: 1, historia: 1, ciencias: 1, linguas: 1, programacao: 1 }
     });
 
     io.emit('playerCount', { count: Object.keys(players).length });
@@ -1230,8 +1421,10 @@ io.on('connection', (socket) => {
 
     const correct = data.answerIndex === quiz.correctAnswer;
     const category = quiz.category;
+    const qLvl = quiz.level || 1;
     const pool = questions[category];
-    const correctText = pool && pool[quiz.questionIndex] ? pool[quiz.questionIndex].options[quiz.correctAnswer] : '';
+    const levelPool = pool ? pool[qLvl] : null;
+    const correctText = levelPool && levelPool[quiz.questionIndex] ? levelPool[quiz.questionIndex].options[quiz.correctAnswer] : '';
 
     // Chest quizzes give 2x rewards (30 XP + 10 coins)
     const isChest = !!quiz.isChest;
@@ -1256,18 +1449,23 @@ io.on('connection', (socket) => {
           correctAnswer: correctText, health: p.health, killed: false,
           isChest: true, bonus: '2x'
         });
-        // Record in quizHistory with source
+        // Record in quizHistory with source and level
         if (p.email) {
           const rec = persistedUsers[p.email];
           if (rec) {
             if (!rec.quizHistory) rec.quizHistory = [];
-            rec.quizHistory.push({ category, correct: true, timestamp: Date.now(), source: 'chest' });
+            rec.quizHistory.push({ category, correct: true, timestamp: Date.now(), source: 'chest', level: qLvl });
             if (rec.quizHistory.length > 200) rec.quizHistory = rec.quizHistory.slice(-200);
             if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
             rec.stats.totalCorrect = (rec.stats.totalCorrect || 0) + 1;
             rec.profile = { xp: p.xp, level: p.level, coins: p.coins };
             saveData();
             checkAchievements(p.email, socket.id);
+            // Check progression
+            const newProgLevel = checkProgression(p.email, category);
+            if (newProgLevel) {
+              socket.emit('progressionUnlock', { category, newLevel: newProgLevel });
+            }
           }
         }
       } else {
@@ -1326,8 +1524,15 @@ io.on('connection', (socket) => {
             correctAnswer: correctText, health: p.health, killed: false
           });
         }
-        recordQuizResult(p, category, true);
-        if (p.email) checkAchievements(p.email, socket.id);
+        recordQuizResult(p, category, true, qLvl);
+        if (p.email) {
+          checkAchievements(p.email, socket.id);
+          // Check progression
+          const newProgLevel = checkProgression(p.email, category);
+          if (newProgLevel) {
+            socket.emit('progressionUnlock', { category, newLevel: newProgLevel });
+          }
+        }
       }
     } else {
       // Wrong answer
@@ -1342,13 +1547,13 @@ io.on('connection', (socket) => {
         io.to(socket.id).emit('dead');
         io.emit('killfeed', { text: p.name + ' foi derrotado!' });
       }
-      if (!isChest) recordQuizResult(p, category, false);
+      if (!isChest) recordQuizResult(p, category, false, qLvl);
       else {
         if (p.email) {
           const rec = persistedUsers[p.email];
           if (rec) {
             if (!rec.quizHistory) rec.quizHistory = [];
-            rec.quizHistory.push({ category, correct: false, timestamp: Date.now(), source: 'chest' });
+            rec.quizHistory.push({ category, correct: false, timestamp: Date.now(), source: 'chest', level: qLvl });
             if (rec.quizHistory.length > 200) rec.quizHistory = rec.quizHistory.slice(-200);
             if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
             rec.stats.totalWrong = (rec.stats.totalWrong || 0) + 1;
@@ -1371,9 +1576,27 @@ io.on('connection', (socket) => {
 
     // Check distance
     const dist = Math.hypot(p.x - totem.x, p.y - totem.y);
-    if (dist > 80) return;
+    if (dist > 120) return;
 
-    const question = getRandomQuestion(totem.category);
+    // Zone locking: check if player has unlocked this zone
+    const totemZone = totem.zone || 1;
+    if (totemZone > 1) {
+      const playerEmail = p.email;
+      const userData = playerEmail ? getUserData(playerEmail) : null;
+      const prog = userData && userData.progression ? userData.progression : {};
+      const playerLevel = prog[totem.category] || 1;
+      if (playerLevel < totemZone) {
+        socket.emit('zoneLocked', { zone: totemZone, category: totem.category, required: totemZone });
+        return;
+      }
+    }
+
+    // Use player's progression level for question
+    const playerEmail = p.email;
+    const userData = playerEmail ? getUserData(playerEmail) : null;
+    const prog = userData && userData.progression ? userData.progression : {};
+    const qLevel = prog[totem.category] || 1;
+    const question = getRandomQuestion(totem.category, qLevel);
     if (!question) return;
 
     activeQuizzes[socket.id] = {
@@ -1381,6 +1604,7 @@ io.on('connection', (socket) => {
       totemId: totem.id,
       questionIndex: question.index,
       category: totem.category,
+      level: question.level,
       correctAnswer: question.answer,
       timestamp: Date.now()
     };
@@ -1396,6 +1620,7 @@ io.on('connection', (socket) => {
       options: question.options,
       timeLimit: QUIZ_TIME_LIMIT / 1000,
       category: totem.category,
+      level: question.level,
       miniLesson: miniLesson
     });
   });
@@ -1411,7 +1636,7 @@ io.on('connection', (socket) => {
 
     // Check distance
     const dist = Math.hypot(p.x - chest.x, p.y - chest.y);
-    if (dist > 60) return;
+    if (dist > 100) return;
 
     // Check cooldown per player
     const now = Date.now();
@@ -1422,7 +1647,25 @@ io.on('connection', (socket) => {
       return;
     }
 
-    const question = getRandomQuestion(chest.category);
+    // Zone locking for chests
+    const chestZone = chest.zone || 1;
+    if (chestZone > 1) {
+      const playerEmail = p.email;
+      const userData = playerEmail ? getUserData(playerEmail) : null;
+      const prog = userData && userData.progression ? userData.progression : {};
+      const playerLevel = prog[chest.category] || 1;
+      if (playerLevel < chestZone) {
+        socket.emit('zoneLocked', { zone: chestZone, category: chest.category, required: chestZone });
+        return;
+      }
+    }
+
+    // Use player's progression level for question
+    const chestPlayerEmail = p.email;
+    const chestUserData = chestPlayerEmail ? getUserData(chestPlayerEmail) : null;
+    const chestProg = chestUserData && chestUserData.progression ? chestUserData.progression : {};
+    const chestQLevel = chestProg[chest.category] || 1;
+    const question = getRandomQuestion(chest.category, chestQLevel);
     if (!question) return;
 
     // Mark chest as opened for cooldown tracking
@@ -1433,6 +1676,7 @@ io.on('connection', (socket) => {
       chestId: chest.id,
       questionIndex: question.index,
       category: chest.category,
+      level: question.level,
       correctAnswer: question.answer,
       timestamp: now,
       isChest: true
@@ -1445,6 +1689,7 @@ io.on('connection', (socket) => {
       options: question.options,
       timeLimit: QUIZ_TIME_LIMIT / 1000,
       category: chest.category,
+      level: question.level,
       isChest: true
     });
   });
@@ -1459,7 +1704,7 @@ io.on('connection', (socket) => {
 
     // Check distance
     const dist = Math.hypot(p.x - sign.x, p.y - sign.y);
-    if (dist > 50) return;
+    if (dist > 80) return;
 
     const tips = studyTips[sign.category] || [];
     const tip = tips[sign.tipIndex % tips.length] || 'Dica: Continue estudando!';
@@ -1469,6 +1714,26 @@ io.on('connection', (socket) => {
       tip,
       category: sign.category
     });
+  });
+
+  // ---- Portal Teleport ----
+  socket.on('usePortal', (data) => {
+    const p = players[socket.id];
+    if (!p || p.health <= 0) return;
+    if (activeQuizzes[socket.id]) return;
+
+    const portal = portals.find(pt => pt.id === data.portalId);
+    if (!portal) return;
+
+    // Check distance
+    const dist = Math.hypot(p.x - portal.x, p.y - portal.y);
+    if (dist > 100) return;
+
+    // Teleport to target island
+    p.x = portal.targetX;
+    p.y = portal.targetY;
+
+    socket.emit('teleported', { x: p.x, y: p.y, island: portal.category });
   });
 
   socket.on('chat', (data) => {
@@ -1536,7 +1801,11 @@ io.on('connection', (socket) => {
     // Pick a random category based on current island
     const isl = getIslandAt(challenger.x, challenger.y);
     const category = (isl && isl.category) ? isl.category : Object.keys(questions)[Math.floor(Math.random() * Object.keys(questions).length)];
-    const question = getRandomQuestion(category);
+    // Use challenger's progression level for the duel question
+    const challengerData = challenger.email ? getUserData(challenger.email) : null;
+    const challengerProg = challengerData && challengerData.progression ? challengerData.progression : {};
+    const duelQLevel = challengerProg[category] || 1;
+    const question = getRandomQuestion(category, duelQLevel);
     if (!question) return;
 
     activeDuels[pending.duelId] = {

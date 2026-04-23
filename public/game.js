@@ -114,12 +114,19 @@
   let totemDefs = [];
   let chestDefs = [];
   let signDefs = [];
-  let mapW = 4000;
-  let mapH = 4000;
+  let portalDefs = [];
+  let mapW = 6000;
+  let mapH = 6000;
+
+  // Sprint stamina
+  let sprintStamina = 100;
 
   // Achievements data
   let allAchievements = [];
   let unlockedAchievements = [];
+
+  // Progression data (tracks level unlocked per category)
+  let playerProgression = { matematica: 1, historia: 1, ciencias: 1, linguas: 1, programacao: 1 };
 
   // Chest open state (client-side cooldown tracking)
   const chestOpenState = {}; // chestId -> { openedAt, cooldown }
@@ -136,6 +143,7 @@
   let localBullets = [];
   let particles = [];
   let allPlayersData = [];
+  let progressionRings = []; // expanding ring effects for level unlocks
 
   // Camera
   let cam = { x: 0, y: 0 };
@@ -388,37 +396,69 @@
     });
   }
 
-  // ---- Interact (E key): priority totem > chest > sign ----
+  // ---- Interact (E key): priority portal > totem > chest > sign ----
   function handleTotemInteract() {
     if (isDead || !localPlayer || quizActive) return;
 
-    // 1. Check totems (80px range)
+    // 0. Check portals (100px range)
+    if (portalDefs) {
+      let nearestPortal = null;
+      let nearestPortalDist = 100;
+      for (const p of portalDefs) {
+        const d = Math.hypot(localPlayer.x - p.x, localPlayer.y - p.y);
+        if (d < nearestPortalDist) { nearestPortalDist = d; nearestPortal = p; }
+      }
+      if (nearestPortal) {
+        socket.emit('usePortal', { portalId: nearestPortal.id });
+        return;
+      }
+    }
+
+    // 1. Check totems (120px range)
     let nearestTotem = null;
-    let nearestTotemDist = 80;
+    let nearestTotemDist = 120;
     for (const t of totemDefs) {
       const d = Math.hypot(localPlayer.x - t.x, localPlayer.y - t.y);
       if (d < nearestTotemDist) { nearestTotemDist = d; nearestTotem = t; }
     }
     if (nearestTotem) {
+      // Local zone check before emitting
+      const totemZone = nearestTotem.zone || 1;
+      if (totemZone > 1) {
+        const isUnlocked = playerProgression[nearestTotem.category] >= totemZone;
+        if (!isUnlocked) {
+          showZoneLockedMessage(totemZone);
+          return;
+        }
+      }
       socket.emit('totemInteract', { totemId: nearestTotem.id });
       return;
     }
 
-    // 2. Check chests (60px range)
+    // 2. Check chests (100px range)
     let nearestChest = null;
-    let nearestChestDist = 60;
+    let nearestChestDist = 100;
     for (const c of chestDefs) {
       const d = Math.hypot(localPlayer.x - c.x, localPlayer.y - c.y);
       if (d < nearestChestDist) { nearestChestDist = d; nearestChest = c; }
     }
     if (nearestChest) {
+      // Local zone check for chests
+      const chestZone = nearestChest.zone || 1;
+      if (chestZone > 1) {
+        const isUnlocked = playerProgression[nearestChest.category] >= chestZone;
+        if (!isUnlocked) {
+          showZoneLockedMessage(chestZone);
+          return;
+        }
+      }
       socket.emit('chestInteract', { chestId: nearestChest.id });
       return;
     }
 
-    // 3. Check signs (50px range)
+    // 3. Check signs (80px range)
     let nearestSign = null;
-    let nearestSignDist = 50;
+    let nearestSignDist = 80;
     for (const s of signDefs) {
       const d = Math.hypot(localPlayer.x - s.x, localPlayer.y - s.y);
       if (d < nearestSignDist) { nearestSignDist = d; nearestSign = s; }
@@ -434,6 +474,7 @@
   // ================================================================
   function openQuiz(data) {
     quizActive = true;
+    window._quizShieldActive = true;
     quizEnemyId = data.enemyId;
     quizTimeLeft = data.timeLimit;
 
@@ -496,6 +537,7 @@
 
   function closeQuiz() {
     quizActive = false;
+    window._quizShieldActive = false;
     elQuizModal.style.display = 'none';
     elTimerText.style.color = '#00e5ff';
     if (quizTimerInterval) {
@@ -550,12 +592,14 @@
     totemDefs = data.totems;
     chestDefs = data.chests || [];
     signDefs = data.infoSigns || [];
+    portalDefs = data.portals || [];
     mapW = data.mapW;
     mapH = data.mapH;
     isDead = false;
     playerDirection = 'down';
     if (data.allAchievements) allAchievements = data.allAchievements;
     if (data.unlockedAchievements) unlockedAchievements = data.unlockedAchievements;
+    if (data.progression) playerProgression = data.progression;
     updateAchievementsBadge();
     updateHUD();
   });
@@ -704,6 +748,7 @@
     duelActive = true;
     currentDuelId = data.duelId;
     quizActive = true; // Prevent movement/shooting during duel
+    window._quizShieldActive = true;
 
     const catName = categoryInfo[data.category] ? categoryInfo[data.category].name : data.category;
     elQuizCategory.textContent = '\u2694 DUELO - ' + catName;
@@ -743,6 +788,7 @@
     duelActive = false;
     currentDuelId = null;
     quizActive = false;
+    window._quizShieldActive = false;
     elQuizModal.style.display = 'none';
     elTimerText.style.color = '#00e5ff';
     clearInterval(quizTimerInterval);
@@ -823,6 +869,15 @@
     if (data && data.ok && window._userNotes) {
       updateNotesBadge();
     }
+  });
+
+  // ---- Portal Teleport ----
+  socket.on('teleported', (data) => {
+    if (localPlayer) {
+      localPlayer.x = data.x;
+      localPlayer.y = data.y;
+    }
+    addKillFeed('Teleportado para ' + (data.island || 'ilha'));
   });
 
   socket.on('progressData', (data) => {
@@ -932,6 +987,12 @@
     const xpInLevel = localPlayer.xp % 100;
     elXpFill.style.width = xpInLevel + '%';
     elXpText.textContent = xpInLevel + '/100';
+
+    // Update sprint stamina bar
+    const elStaminaFill = document.getElementById('staminaBarFill');
+    if (elStaminaFill) {
+      elStaminaFill.style.width = sprintStamina + '%';
+    }
 
     // Update island indicator with themed class
     const curIsland = getIslandAt(localPlayer.x, localPlayer.y);
@@ -1464,6 +1525,62 @@
     showAchievementPopup(ach);
   });
 
+  socket.on('progressionUnlock', function(data) {
+    // Update local progression
+    playerProgression[data.category] = data.newLevel;
+    // Show celebration popup
+    const catNames = { matematica: 'Matematica', historia: 'Historia', ciencias: 'Ciencias', linguas: 'Linguas', programacao: 'Programacao' };
+    const catName = catNames[data.category] || data.category;
+    showProgressionUnlockPopup(catName, data.newLevel);
+    // Trigger expanding ring effect on island
+    spawnProgressionRings(data.category);
+  });
+
+  socket.on('zoneLocked', function(data) {
+    showZoneLockedMessage(data.required);
+  });
+
+  function showProgressionUnlockPopup(catName, newLevel) {
+    const popup = document.createElement('div');
+    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
+      'background:linear-gradient(135deg,rgba(10,30,10,0.97),rgba(0,60,20,0.95));' +
+      'border:2px solid #69f0ae;border-radius:16px;padding:24px 36px;text-align:center;' +
+      'color:#fff;z-index:9999;box-shadow:0 0 40px rgba(105,240,174,0.5);' +
+      'animation:fadeInScale 0.4s ease;font-family:"Segoe UI",sans-serif;';
+    popup.innerHTML =
+      '<div style="font-size:36px;margin-bottom:8px;">&#127881;</div>' +
+      '<div style="font-size:18px;font-weight:800;color:#69f0ae;margin-bottom:6px;">Nivel ' + newLevel + ' Desbloqueado!</div>' +
+      '<div style="font-size:14px;opacity:0.85;">' + catName + ' - Novo conteudo disponivel!</div>';
+    document.body.appendChild(popup);
+    setTimeout(function() {
+      popup.style.transition = 'opacity 0.5s';
+      popup.style.opacity = '0';
+      setTimeout(function() { if (popup.parentNode) popup.parentNode.removeChild(popup); }, 500);
+    }, 3000);
+  }
+
+  function showZoneLockedMessage(requiredLevel) {
+    addKillFeed('Acerte mais perguntas no Nivel ' + (requiredLevel - 1) + ' para desbloquear o Nivel ' + requiredLevel + '!');
+  }
+
+  function spawnProgressionRings(category) {
+    const isl = islands.find(i => i.category === category);
+    if (!isl) return;
+    // Queue some expanding ring particles at island center
+    for (let r = 0; r < 3; r++) {
+      setTimeout(function() {
+        progressionRings.push({
+          x: isl.x, y: isl.y,
+          radius: 0,
+          maxRadius: Math.max(isl.rx, isl.ry) * 1.2,
+          alpha: 0.8,
+          color: categoryInfo[category] ? categoryInfo[category].accent : '#ffd700',
+          born: gameTime
+        });
+      }, r * 200);
+    }
+  }
+
   socket.on('achievementsData', function(data) {
     if (data.all) allAchievements = data.all;
     if (data.unlocked) unlockedAchievements = data.unlocked;
@@ -1617,7 +1734,15 @@
       dx /= len;
       dy /= len;
 
-      const speed = 3;
+      const isSprinting = keys['shift'] && sprintStamina > 0;
+      const speed = isSprinting ? 6 : 3;
+
+      // Drain stamina while sprinting
+      if (isSprinting) {
+        sprintStamina = Math.max(0, sprintStamina - 0.5);
+      } else {
+        sprintStamina = Math.min(100, sprintStamina + 0.3);
+      }
 
       const newX = Math.max(16, Math.min(mapW - 16, localPlayer.x + dx * speed));
       const newY = Math.max(16, Math.min(mapH - 16, localPlayer.y + dy * speed));
@@ -1633,6 +1758,9 @@
       // Otherwise don't move (blocked by water)
 
       walkCycle += 0.15;
+    } else {
+      // Recover stamina while standing still
+      sprintStamina = Math.min(100, sprintStamina + 0.3);
     }
 
     sendTimer += dt;
@@ -1681,6 +1809,37 @@
     }
   }
 
+  function updateProgressionRings() {
+    for (let i = progressionRings.length - 1; i >= 0; i--) {
+      const r = progressionRings[i];
+      r.radius += 4;
+      r.alpha -= 0.012;
+      if (r.alpha <= 0 || r.radius >= r.maxRadius) {
+        progressionRings.splice(i, 1);
+      }
+    }
+  }
+
+  function drawProgressionRings() {
+    for (const r of progressionRings) {
+      const sx = r.x - cam.x;
+      const sy = r.y - cam.y;
+      if (sx < -r.maxRadius || sx > canvas.width + r.maxRadius) continue;
+      if (sy < -r.maxRadius || sy > canvas.height + r.maxRadius) continue;
+      ctx.save();
+      ctx.globalAlpha = r.alpha;
+      ctx.strokeStyle = r.color;
+      ctx.lineWidth = 3;
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = r.color;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    }
+  }
+
   function updateCamera() {
     if (!localPlayer) return;
     const targetX = localPlayer.x - canvas.width / 2;
@@ -1699,8 +1858,8 @@
     const prng = (n) => ((Math.sin(n * 127.1 + 311.7) * 43758.5453) % 1 + 1) % 1;
     for (let i = 0; i < 12; i++) {
       patches.push({
-        wx: prng(i * 3 + 0) * 4000,
-        wy: prng(i * 3 + 1) * 4000,
+        wx: prng(i * 3 + 0) * 6000,
+        wy: prng(i * 3 + 1) * 6000,
         strands: 3 + Math.floor(prng(i * 3 + 2) * 3), // 3-5
         heights: Array.from({ length: 5 }, (_, s) => 20 + prng(i * 7 + s) * 20),
         offsets: Array.from({ length: 5 }, (_, s) => prng(i * 11 + s) * Math.PI * 2),
@@ -1717,8 +1876,8 @@
     const prng = (n) => ((Math.sin(n * 53.7 + 99.1) * 74231.8) % 1 + 1) % 1;
     for (let i = 0; i < 30; i++) {
       parts.push({
-        wx: prng(i * 4 + 0) * 4000,
-        wy: prng(i * 4 + 1) * 4000,
+        wx: prng(i * 4 + 0) * 6000,
+        wy: prng(i * 4 + 1) * 6000,
         size: 1 + prng(i * 4 + 2) * 2,
         alpha: 0.05 + prng(i * 4 + 3) * 0.10,
         speed: 0.3 + prng(i * 5 + 0) * 0.5,
@@ -2311,13 +2470,74 @@
       ctx.fillStyle = shGrd;
       ctx.fill();
 
+      // --- Zone boundary rings (only for themed islands) ---
+      if (isl.category) {
+        const playerLevelInCat = playerProgression[isl.category] || 1;
+
+        // Zone 1->2 boundary at 0.6 radius
+        const z2Unlocked = playerLevelInCat >= 2;
+        ctx.save();
+        ctx.setLineDash([8, 6]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, isl.rx * 0.6, isl.ry * 0.6, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = z2Unlocked ? 'rgba(105,240,174,0.3)' : 'rgba(255,50,50,0.3)';
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Lock icon if locked
+        if (!z2Unlocked) {
+          ctx.font = '12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = 'rgba(255,100,100,0.7)';
+          ctx.fillText('\uD83D\uDD12', sx, sy - isl.ry * 0.6 - 4);
+        }
+        ctx.restore();
+
+        // Zone 2->3 boundary at 0.3 radius
+        const z3Unlocked = playerLevelInCat >= 3;
+        ctx.save();
+        ctx.setLineDash([6, 5]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, isl.rx * 0.3, isl.ry * 0.3, 0, 0, Math.PI * 2);
+        ctx.strokeStyle = z3Unlocked ? 'rgba(105,240,174,0.3)' : 'rgba(255,50,50,0.3)';
+        ctx.stroke();
+        ctx.setLineDash([]);
+        if (!z3Unlocked) {
+          ctx.font = '12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = 'rgba(255,100,100,0.7)';
+          ctx.fillText('\uD83D\uDD12', sx, sy - isl.ry * 0.3 - 4);
+        }
+        ctx.restore();
+
+        // Zone level labels
+        ctx.save();
+        ctx.font = 'bold 10px "Segoe UI", sans-serif';
+        ctx.textAlign = 'left';
+        // Nivel 1 label (outer zone)
+        ctx.fillStyle = 'rgba(200,230,200,0.7)';
+        ctx.fillText('Nivel 1', sx + isl.rx * 0.65, sy);
+        // Nivel 2 label
+        ctx.fillStyle = z2Unlocked ? 'rgba(200,230,200,0.7)' : 'rgba(150,150,150,0.5)';
+        ctx.fillText('Nivel 2', sx + isl.rx * 0.42, sy - isl.ry * 0.2);
+        // Nivel 3 label
+        ctx.fillStyle = z3Unlocked ? 'rgba(200,230,200,0.7)' : 'rgba(150,150,150,0.5)';
+        ctx.fillText('Nivel 3', sx + isl.rx * 0.12, sy - isl.ry * 0.1);
+        ctx.restore();
+      }
+
       // Island name signpost
-      ctx.font = '600 13px "Segoe UI", system-ui, sans-serif';
+      ctx.font = '600 15px "Segoe UI", system-ui, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillStyle = 'rgba(0,0,0,0.4)';
-      ctx.fillText(isl.name, sx + 1, sy - isl.ry + 31);
+      const islNameW = ctx.measureText(isl.name).width;
+      const islNameY = sy - isl.ry + 30;
+      // Background pill for readability
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(sx - islNameW / 2 - 8, islNameY - 14, islNameW + 16, 20);
+      // Text on top
       ctx.fillStyle = colors.accent;
-      ctx.fillText(isl.name, sx, sy - isl.ry + 30);
+      ctx.fillText(isl.name, sx, islNameY);
 
       // Draw themed decorations
       drawIslandDecorations(isl, sx, sy, colors);
@@ -3474,7 +3694,13 @@
       const sy = t.y - cam.y;
       if (sx < -40 || sx > canvas.width + 40 || sy < -60 || sy > canvas.height + 40) continue;
 
+      const totemZone = t.zone || 1;
+      const isUnlocked = !t.category || playerProgression[t.category] >= totemZone;
+
       const catColor = categoryInfo[t.category] ? categoryInfo[t.category].accent : '#ffd700';
+
+      ctx.save();
+      if (!isUnlocked) ctx.globalAlpha = 0.3;
 
       // Glow
       const glowSize = 18 + Math.sin(gameTime * 3 + t.x * 0.01) * 4;
@@ -3494,7 +3720,7 @@
 
       // Crystal body
       ctx.fillStyle = catColor;
-      ctx.globalAlpha = 0.7;
+      ctx.globalAlpha = isUnlocked ? 0.7 : 0.21;
       ctx.beginPath();
       ctx.moveTo(sx, sy - 22);
       ctx.lineTo(sx + 8, sy - 4);
@@ -3503,24 +3729,44 @@
       ctx.lineTo(sx - 8, sy - 4);
       ctx.closePath();
       ctx.fill();
-      ctx.globalAlpha = 1;
+      ctx.globalAlpha = isUnlocked ? 1 : 0.3;
 
       // Sparkle
       ctx.fillStyle = '#fff';
-      ctx.globalAlpha = 0.5 + Math.sin(gameTime * 4 + t.y * 0.01) * 0.3;
+      ctx.globalAlpha = isUnlocked ? (0.5 + Math.sin(gameTime * 4 + t.y * 0.01) * 0.3) : 0.1;
       ctx.beginPath();
       ctx.arc(sx - 2, sy - 14, 2, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
 
-      // E hint when player is near
-      if (localPlayer) {
+      // Lock icon above locked totems
+      if (!isUnlocked) {
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('\uD83D\uDD12', sx, sy - 28);
+      }
+
+      ctx.restore();
+
+      // E hint when player is near (only if unlocked)
+      if (localPlayer && isUnlocked) {
         const dist = Math.hypot(localPlayer.x - t.x, localPlayer.y - t.y);
-        if (dist < 80) {
+        if (dist < 120) {
           ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
           ctx.textAlign = 'center';
-          ctx.fillStyle = 'rgba(255,255,255,0.7)';
-          ctx.fillText('[E] Interagir', sx, sy - 30);
+          const promptTextT = '[E] Interagir';
+          const twT = ctx.measureText(promptTextT).width;
+          const promptYT = sy + 25;
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(sx - twT / 2 - 6, promptYT - 10, twT + 12, 16, 6);
+            ctx.fill();
+          } else {
+            ctx.fillRect(sx - twT / 2 - 6, promptYT - 10, twT + 12, 16);
+          }
+          ctx.fillStyle = 'rgba(255,255,255,0.9)';
+          ctx.fillText(promptTextT, sx, promptYT);
         }
       }
     }
@@ -3537,6 +3783,9 @@
       const sy = c.y - cam.y;
       if (sx < -50 || sx > canvas.width + 50 || sy < -60 || sy > canvas.height + 50) continue;
 
+      const chestZone = c.zone || 1;
+      const isChestUnlocked = !c.category || playerProgression[c.category] >= chestZone;
+
       // Determine open state (cooldown active = opened)
       const openState = chestOpenState[c.id];
       const isOpen = openState && (now - openState.openedAt < openState.cooldown);
@@ -3545,6 +3794,7 @@
       const shimmer = 0.5 + 0.5 * Math.sin(gameTime * 3 + c.x * 0.03);
 
       ctx.save();
+      if (!isChestUnlocked) ctx.globalAlpha = 0.3;
 
       // Ground shadow
       ctx.fillStyle = 'rgba(0,0,0,0.25)';
@@ -3671,7 +3921,7 @@
         ctx.fill();
 
         // 2x label floating above
-        const floatY = sy - 22 + Math.sin(gameTime * 2.5 + c.x * 0.01) * 3;
+        const floatY = sy - 28 + Math.sin(gameTime * 2.5 + c.x * 0.01) * 3;
         ctx.font = 'bold 10px "Segoe UI", system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillStyle = `rgba(255,215,0,${0.7 + shimmer * 0.3})`;
@@ -3681,19 +3931,63 @@
         ctx.shadowBlur = 0;
       }
 
+      // Lock icon for locked chests
+      if (!isChestUnlocked) {
+        ctx.globalAlpha = 1;
+        ctx.font = '14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('\uD83D\uDD12', sx, sy - 22);
+        ctx.globalAlpha = 0.3;
+      }
+
       // E prompt when nearby
       if (localPlayer) {
         const dist = Math.hypot(localPlayer.x - c.x, localPlayer.y - c.y);
-        if (dist < 60) {
+        if (dist < 100) {
+          ctx.globalAlpha = 1;
           ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
           ctx.textAlign = 'center';
           ctx.shadowBlur = 0;
-          if (isOpen) {
-            ctx.fillStyle = 'rgba(180,180,180,0.6)';
-            ctx.fillText('[E] Recarregando...', sx, sy - 26);
+          const promptYC = sy + 30;
+          if (!isChestUnlocked) {
+            const promptTextC = '\uD83D\uDD12 Zona Bloqueada';
+            const twC = ctx.measureText(promptTextC).width;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            if (ctx.roundRect) {
+              ctx.beginPath();
+              ctx.roundRect(sx - twC / 2 - 6, promptYC - 10, twC + 12, 16, 6);
+              ctx.fill();
+            } else {
+              ctx.fillRect(sx - twC / 2 - 6, promptYC - 10, twC + 12, 16);
+            }
+            ctx.fillStyle = 'rgba(255,100,100,0.9)';
+            ctx.fillText(promptTextC, sx, promptYC);
+          } else if (isOpen) {
+            const promptTextC = '[E] Recarregando...';
+            const twC = ctx.measureText(promptTextC).width;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            if (ctx.roundRect) {
+              ctx.beginPath();
+              ctx.roundRect(sx - twC / 2 - 6, promptYC - 10, twC + 12, 16, 6);
+              ctx.fill();
+            } else {
+              ctx.fillRect(sx - twC / 2 - 6, promptYC - 10, twC + 12, 16);
+            }
+            ctx.fillStyle = 'rgba(180,180,180,0.9)';
+            ctx.fillText(promptTextC, sx, promptYC);
           } else {
+            const promptTextC = '[E] Abrir Bau (+2x)';
+            const twC = ctx.measureText(promptTextC).width;
+            ctx.fillStyle = 'rgba(0,0,0,0.6)';
+            if (ctx.roundRect) {
+              ctx.beginPath();
+              ctx.roundRect(sx - twC / 2 - 6, promptYC - 10, twC + 12, 16, 6);
+              ctx.fill();
+            } else {
+              ctx.fillRect(sx - twC / 2 - 6, promptYC - 10, twC + 12, 16);
+            }
             ctx.fillStyle = 'rgba(255,215,0,0.9)';
-            ctx.fillText('[E] Abrir Bau (+2x)', sx, sy - 26);
+            ctx.fillText(promptTextC, sx, promptYC);
           }
         }
       }
@@ -3762,8 +4056,120 @@
       // E prompt when nearby
       if (nearPlayer) {
         ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        ctx.fillText('[E] Ler Dica', sx, by - 6);
+        ctx.textAlign = 'center';
+        const promptTextS = '[E] Ler Dica';
+        const twS = ctx.measureText(promptTextS).width;
+        const promptYS = sy + 18;
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        if (ctx.roundRect) {
+          ctx.beginPath();
+          ctx.roundRect(sx - twS / 2 - 6, promptYS - 10, twS + 12, 16, 6);
+          ctx.fill();
+        } else {
+          ctx.fillRect(sx - twS / 2 - 6, promptYS - 10, twS + 12, 16);
+        }
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.fillText(promptTextS, sx, promptYS);
+      }
+
+      ctx.restore();
+    }
+  }
+
+  // ================================================================
+  //  RENDERING - TELEPORT PORTALS
+  // ================================================================
+  function drawPortals() {
+    if (!portalDefs || !portalDefs.length) return;
+    for (const p of portalDefs) {
+      const sx = p.x - cam.x;
+      const sy = p.y - cam.y;
+      if (sx < -60 || sx > canvas.width + 60 || sy < -60 || sy > canvas.height + 60) continue;
+
+      const catColors = {
+        matematica: '#00e5ff', historia: '#ffab40', ciencias: '#69f0ae',
+        linguas: '#ea80fc', programacao: '#76ff03'
+      };
+      const color = catColors[p.category] || '#ffd700';
+
+      ctx.save();
+
+      // Outer glow
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = color;
+
+      // Swirling ring
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 3;
+      ctx.globalAlpha = 0.6 + Math.sin(gameTime * 3) * 0.2;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 18, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner vortex (rotating arcs)
+      ctx.globalAlpha = 0.4;
+      for (let a = 0; a < 3; a++) {
+        const startAngle = gameTime * 2 + (a / 3) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 12, startAngle, startAngle + Math.PI * 0.6);
+        ctx.stroke();
+      }
+
+      // Center dot
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Floating particles going into portal
+      for (let i = 0; i < 4; i++) {
+        const pa = gameTime * 1.5 + (i / 4) * Math.PI * 2;
+        const pr = 25 - ((gameTime * 20 + i * 10) % 25);
+        const px2 = sx + Math.cos(pa) * pr;
+        const py2 = sy + Math.sin(pa) * pr;
+        ctx.globalAlpha = pr / 25 * 0.5;
+        ctx.beginPath();
+        ctx.arc(px2, py2, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.shadowBlur = 0;
+
+      // Label below portal
+      ctx.font = '600 11px "Segoe UI", system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      const label = p.label.replace('Ilha da ', '').replace('Ilha das ', '').replace('Ilha do ', '');
+      const tw = ctx.measureText(label).width;
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      if (ctx.roundRect) {
+        ctx.beginPath();
+        ctx.roundRect(sx - tw/2 - 5, sy + 24, tw + 10, 16, 6);
+        ctx.fill();
+      } else {
+        ctx.fillRect(sx - tw/2 - 5, sy + 24, tw + 10, 16);
+      }
+      ctx.fillStyle = color;
+      ctx.fillText(label, sx, sy + 36);
+
+      // E prompt when nearby
+      if (localPlayer) {
+        const dist = Math.hypot(localPlayer.x - p.x, localPlayer.y - p.y);
+        if (dist < 100) {
+          const promptText = '[E] Teleportar';
+          const ptw = ctx.measureText(promptText).width;
+          ctx.fillStyle = 'rgba(0,0,0,0.6)';
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(sx - ptw/2 - 6, sy + 42, ptw + 12, 16, 6);
+            ctx.fill();
+          } else {
+            ctx.fillRect(sx - ptw/2 - 6, sy + 42, ptw + 12, 16);
+          }
+          ctx.fillStyle = 'rgba(255,255,255,0.9)';
+          ctx.fillText(promptText, sx, sy + 54);
+        }
       }
 
       ctx.restore();
@@ -3967,12 +4373,12 @@
     const sx = x - cam.x;
     const sy = y - cam.y;
 
-    // Expanded frustum bounds for larger characters
-    if (sx < -100 || sx > canvas.width + 100 || sy < -120 || sy > canvas.height + 100) return;
+    // Frustum culling bounds
+    if (sx < -80 || sx > canvas.width + 80 || sy < -100 || sy > canvas.height + 80) return;
 
     const cid = charType || 'luna';
     const cdef = charDefs[cid] || charDefs.luna;
-    const S = 2.4; // scale factor
+    const S = 1.5; // scale factor
 
     direction = direction || 'down';
     const bob = isMoving ? Math.sin(walkCycle * (isSelf ? 1 : 0.8)) * 3 : Math.sin(gameTime * 2) * 1.5;
@@ -3982,14 +4388,25 @@
     // Shadow (drawn at world scale, not character scale)
     ctx.fillStyle = 'rgba(0,0,0,0.2)';
     ctx.beginPath();
-    ctx.ellipse(sx, sy + 18, 28, 10, 0, 0, Math.PI * 2);
+    ctx.ellipse(sx, sy + 18, 20, 7, 0, 0, Math.PI * 2);
     ctx.fill();
 
     // Glow under character (also at world scale)
     if (isSelf) {
       ctx.fillStyle = cdef.glowColor;
       ctx.beginPath();
-      ctx.arc(sx, sy + 10, 38, 0, Math.PI * 2);
+      ctx.arc(sx, sy + 10, 26, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Quiz/duel shield bubble
+    if (isSelf && window._quizShieldActive) {
+      ctx.strokeStyle = 'rgba(0, 180, 255, 0.4)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(sx, sy - 5, 30, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(0, 180, 255, 0.08)';
       ctx.fill();
     }
 
@@ -4179,7 +4596,7 @@
 
     // Floating book orbiting character (world scale, larger)
     const bookAngle = gameTime * 1.5 + (isSelf ? 0 : x * 0.01);
-    const bookOrbitR = 32;
+    const bookOrbitR = 22;
     const bookX = sx + Math.cos(bookAngle) * bookOrbitR;
     const bookY = sy + bob - 5 + Math.sin(bookAngle * 2) * 5;
     // Book glow
@@ -4201,12 +4618,23 @@
     ctx.globalAlpha = 1;
 
     // Name tag + level (readable, not scaled)
-    ctx.font = '600 13px "Segoe UI", system-ui, sans-serif';
+    ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';
     ctx.textAlign = 'center';
+    const nameText = name + ' Lv.' + (level || 1);
+    const nameTextW = ctx.measureText(nameText).width;
+    const nameY = sy + bob - 45;
+    // Background pill for readability
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillText(name + ' Lv.' + (level || 1), sx + 1, sy + bob - 59);
+    if (ctx.roundRect) {
+      ctx.beginPath();
+      ctx.roundRect(sx - nameTextW / 2 - 6, nameY - 10, nameTextW + 12, 16, 8);
+      ctx.fill();
+    } else {
+      ctx.fillRect(sx - nameTextW / 2 - 6, nameY - 10, nameTextW + 12, 16);
+    }
+    // Text on top of pill
     ctx.fillStyle = isSelf ? '#ffd700' : '#fff';
-    ctx.fillText(name + ' Lv.' + (level || 1), sx, sy + bob - 60);
+    ctx.fillText(nameText, sx, nameY);
 
     // Show recent achievement badges below name tag (only for self player)
     if (isSelf && unlockedAchievements.length > 0) {
@@ -4220,7 +4648,7 @@
       for (let bi = 0; bi < iconCount; bi++) {
         const achDef = allAchievements.find(function(a) { return a.id === recentIds[bi]; });
         if (achDef) {
-          ctx.fillText(achDef.icon, startX + bi * spacing, sy + bob - 44);
+          ctx.fillText(achDef.icon, startX + bi * spacing, sy + bob - 30);
         }
       }
       ctx.textBaseline = 'alphabetic';
@@ -4228,10 +4656,10 @@
 
     // Health bar above character (if damaged)
     if (health < 100) {
-      const barW = 48;
+      const barW = 36;
       const barH = 4;
       const bx = sx - barW / 2;
-      const by = sy + bob - 66;
+      const by = sy + bob - 50;
       ctx.fillStyle = 'rgba(0,0,0,0.4)';
       ctx.fillRect(bx, by, barW, barH);
       const pct = Math.max(0, health) / 100;
@@ -4993,6 +5421,31 @@
       ctx.globalAlpha = 1;
     }
 
+    // ----- Portals -----
+    if (portalDefs && portalDefs.length) {
+      const catColors = {
+        matematica: '#00e5ff', historia: '#ffab40', ciencias: '#69f0ae',
+        linguas: '#ea80fc', programacao: '#76ff03'
+      };
+      for (const portal of portalDefs) {
+        const px2 = mx + portal.x * scale;
+        const py2 = my + portal.y * scale;
+        const pcolor = catColors[portal.category] || '#ffd700';
+        ctx.strokeStyle = pcolor;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.8 + Math.sin(gameTime * 3) * 0.2;
+        // Draw diamond shape
+        ctx.beginPath();
+        ctx.moveTo(px2, py2 - 3);
+        ctx.lineTo(px2 + 3, py2);
+        ctx.lineTo(px2, py2 + 3);
+        ctx.lineTo(px2 - 3, py2);
+        ctx.closePath();
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
     // ----- Enemies -----
     ctx.fillStyle = '#ff1744';
     for (const e of enemies) {
@@ -5161,6 +5614,7 @@
     updateRemotePlayers();
     updateLocalBullets();
     updateParticles();
+    updateProgressionRings();
     updateCamera();
     updateHUD();
 
@@ -5196,9 +5650,11 @@
     drawBridges();
     drawIslands();
     drawPalmTrees();
+    drawProgressionRings();
     drawTotems();
     drawChests();
     drawSigns();
+    drawPortals();
     drawEnemies();
     drawBullets();
     drawParticles();
