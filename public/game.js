@@ -602,6 +602,29 @@
     if (data.progression) playerProgression = data.progression;
     updateAchievementsBadge();
     updateHUD();
+
+    // Rebuild notes tabs to match current archipelago's islands
+    var notesTabs = document.querySelector('.notes-tabs');
+    if (notesTabs && data.islands) {
+      var subjects = data.islands.filter(function(i) { return i.category !== null; });
+      if (subjects.length > 0) {
+        notesTabs.innerHTML = '';
+        var catColors = { blue: '#00e5ff', brown: '#ffab40', green: '#69f0ae', purple: '#ea80fc', neon: '#76ff03', gold: '#ffd700' };
+        subjects.forEach(function(isl, idx) {
+          var btn = document.createElement('button');
+          btn.className = 'notes-tab' + (idx === 0 ? ' active' : '');
+          btn.setAttribute('data-cat', isl.category);
+          var color = catColors[isl.theme] || '#ffd700';
+          var shortName = isl.name.replace('Ilha da ', '').replace('Ilha das ', '').replace('Ilha do ', '');
+          btn.innerHTML = '<span class="tab-dot" style="background:' + color + '"></span> ' + shortName;
+          notesTabs.appendChild(btn);
+        });
+        // Set current category to first subject
+        currentNoteCategory = subjects[0].category;
+        // Re-init tab click handlers
+        initNotesPanel();
+      }
+    }
   });
 
   socket.on('state', (data) => {
@@ -848,7 +871,12 @@
 
   // ---- Join ----
   const userEmail = sessionStorage.getItem('email') || null;
-  socket.emit('join', { name: username, characterId: characterId, email: userEmail });
+  socket.emit('join', {
+    name: username,
+    characterId: characterId,
+    email: userEmail,
+    archipelagoId: sessionStorage.getItem('archipelagoId') || 'classic'
+  });
 
   // ---- Persistence socket listeners ----
   socket.on('notesData', (data) => {
@@ -2471,59 +2499,96 @@
       ctx.fill();
 
       // --- Zone boundary rings (only for themed islands) ---
+      // State classification per zone boundary:
+      //   completed  = player has already passed this zone (level > zone threshold)
+      //   available  = player is exactly at this zone (current zone, pulsing gold)
+      //   locked     = player hasn't reached this zone yet (red dashed)
       if (isl.category) {
         const playerLevelInCat = playerProgression[isl.category] || 1;
 
-        // Zone 1->2 boundary at 0.6 radius
-        const z2Unlocked = playerLevelInCat >= 2;
+        // ---- Zone 1->2 boundary at 0.6 radius ----
+        const z2Completed = playerLevelInCat > 2;   // passed zone 2 entirely
+        const z2Available = playerLevelInCat === 2; // currently in zone 2
+        const z2Locked    = playerLevelInCat < 2;
+
         ctx.save();
-        ctx.setLineDash([8, 6]);
         ctx.lineWidth = 1.5;
+        if (z2Completed) {
+          // Solid green line — done
+          ctx.setLineDash([]);
+          ctx.strokeStyle = 'rgba(105,240,174,0.4)';
+        } else if (z2Available) {
+          // Pulsing gold dashed — current frontier
+          const pulse = 0.3 + Math.abs(Math.sin(gameTime * 2)) * 0.3;
+          ctx.setLineDash([8, 6]);
+          ctx.strokeStyle = `rgba(255,215,0,${pulse})`;
+        } else {
+          // Red dashed — locked
+          ctx.setLineDash([8, 6]);
+          ctx.strokeStyle = 'rgba(255,50,50,0.25)';
+        }
         ctx.beginPath();
         ctx.ellipse(sx, sy, isl.rx * 0.6, isl.ry * 0.6, 0, 0, Math.PI * 2);
-        ctx.strokeStyle = z2Unlocked ? 'rgba(105,240,174,0.3)' : 'rgba(255,50,50,0.3)';
         ctx.stroke();
         ctx.setLineDash([]);
-        // Lock icon if locked
-        if (!z2Unlocked) {
-          ctx.font = '12px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = 'rgba(255,100,100,0.7)';
-          ctx.fillText('\uD83D\uDD12', sx, sy - isl.ry * 0.6 - 4);
+        // Label
+        ctx.font = 'bold 10px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        if (z2Completed) {
+          ctx.fillStyle = 'rgba(105,240,174,0.85)';
+          ctx.fillText('\u2713 Nivel 2', sx, sy - isl.ry * 0.6 - 4);
+        } else if (z2Available) {
+          ctx.fillStyle = 'rgba(255,215,0,0.9)';
+          ctx.fillText('\u2192 Nivel 2', sx, sy - isl.ry * 0.6 - 4);
+        } else {
+          ctx.fillStyle = 'rgba(255,80,80,0.8)';
+          ctx.fillText('\uD83D\uDD12 Nivel 2', sx, sy - isl.ry * 0.6 - 4);
         }
         ctx.restore();
 
-        // Zone 2->3 boundary at 0.3 radius
-        const z3Unlocked = playerLevelInCat >= 3;
+        // ---- Zone 2->3 boundary at 0.3 radius ----
+        const z3Completed = playerLevelInCat > 3;
+        const z3Available = playerLevelInCat === 3;
+        const z3Locked    = playerLevelInCat < 3;
+
         ctx.save();
-        ctx.setLineDash([6, 5]);
         ctx.lineWidth = 1.5;
+        if (z3Completed) {
+          ctx.setLineDash([]);
+          ctx.strokeStyle = 'rgba(105,240,174,0.4)';
+        } else if (z3Available) {
+          const pulse = 0.3 + Math.abs(Math.sin(gameTime * 2 + 1)) * 0.3;
+          ctx.setLineDash([6, 5]);
+          ctx.strokeStyle = `rgba(255,215,0,${pulse})`;
+        } else {
+          ctx.setLineDash([6, 5]);
+          ctx.strokeStyle = 'rgba(255,50,50,0.25)';
+        }
         ctx.beginPath();
         ctx.ellipse(sx, sy, isl.rx * 0.3, isl.ry * 0.3, 0, 0, Math.PI * 2);
-        ctx.strokeStyle = z3Unlocked ? 'rgba(105,240,174,0.3)' : 'rgba(255,50,50,0.3)';
         ctx.stroke();
         ctx.setLineDash([]);
-        if (!z3Unlocked) {
-          ctx.font = '12px sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillStyle = 'rgba(255,100,100,0.7)';
-          ctx.fillText('\uD83D\uDD12', sx, sy - isl.ry * 0.3 - 4);
+        // Label
+        ctx.font = 'bold 10px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        if (z3Completed) {
+          ctx.fillStyle = 'rgba(105,240,174,0.85)';
+          ctx.fillText('\u2713 Nivel 3', sx, sy - isl.ry * 0.3 - 4);
+        } else if (z3Available) {
+          ctx.fillStyle = 'rgba(255,215,0,0.9)';
+          ctx.fillText('\u2192 Nivel 3', sx, sy - isl.ry * 0.3 - 4);
+        } else {
+          ctx.fillStyle = 'rgba(255,80,80,0.8)';
+          ctx.fillText('\uD83D\uDD12 Nivel 3', sx, sy - isl.ry * 0.3 - 4);
         }
         ctx.restore();
 
-        // Zone level labels
+        // ---- Outer Nivel 1 label (no ring, always visible) ----
         ctx.save();
         ctx.font = 'bold 10px "Segoe UI", sans-serif';
         ctx.textAlign = 'left';
-        // Nivel 1 label (outer zone)
-        ctx.fillStyle = 'rgba(200,230,200,0.7)';
+        ctx.fillStyle = playerLevelInCat >= 1 ? 'rgba(200,230,200,0.7)' : 'rgba(150,150,150,0.5)';
         ctx.fillText('Nivel 1', sx + isl.rx * 0.65, sy);
-        // Nivel 2 label
-        ctx.fillStyle = z2Unlocked ? 'rgba(200,230,200,0.7)' : 'rgba(150,150,150,0.5)';
-        ctx.fillText('Nivel 2', sx + isl.rx * 0.42, sy - isl.ry * 0.2);
-        // Nivel 3 label
-        ctx.fillStyle = z3Unlocked ? 'rgba(200,230,200,0.7)' : 'rgba(150,150,150,0.5)';
-        ctx.fillText('Nivel 3', sx + isl.rx * 0.12, sy - isl.ry * 0.1);
         ctx.restore();
       }
 
@@ -3695,52 +3760,156 @@
       if (sx < -40 || sx > canvas.width + 40 || sy < -60 || sy > canvas.height + 40) continue;
 
       const totemZone = t.zone || 1;
-      const isUnlocked = !t.category || playerProgression[t.category] >= totemZone;
+      const catProg = !t.category ? 99 : (playerProgression[t.category] || 1);
+      const isUnlocked = catProg >= totemZone;
+      // A totem is "completed" if the player has already advanced past its zone
+      const isCompleted = catProg > totemZone;
 
       const catColor = categoryInfo[t.category] ? categoryInfo[t.category].accent : '#ffd700';
 
       ctx.save();
-      if (!isUnlocked) ctx.globalAlpha = 0.3;
 
-      // Glow
-      const glowSize = 18 + Math.sin(gameTime * 3 + t.x * 0.01) * 4;
-      ctx.fillStyle = catColor.replace(')', ', 0.12)').replace('rgb', 'rgba');
-      if (catColor.startsWith('#')) {
-        ctx.fillStyle = 'rgba(255,255,255,0.08)';
-      }
-      ctx.beginPath();
-      ctx.arc(sx, sy - 8, glowSize, 0, Math.PI * 2);
-      ctx.fill();
+      if (isCompleted) {
+        // --- COMPLETED state: muted green tint, checkmark badge ---
+        ctx.globalAlpha = 0.7;
 
-      // Crystal base
-      ctx.fillStyle = '#555';
-      ctx.beginPath();
-      ctx.ellipse(sx, sy + 2, 10, 4, 0, 0, Math.PI * 2);
-      ctx.fill();
+        // Subtle green glow
+        ctx.fillStyle = 'rgba(105,240,174,0.10)';
+        ctx.beginPath();
+        ctx.arc(sx, sy - 8, 18, 0, Math.PI * 2);
+        ctx.fill();
 
-      // Crystal body
-      ctx.fillStyle = catColor;
-      ctx.globalAlpha = isUnlocked ? 0.7 : 0.21;
-      ctx.beginPath();
-      ctx.moveTo(sx, sy - 22);
-      ctx.lineTo(sx + 8, sy - 4);
-      ctx.lineTo(sx + 4, sy + 2);
-      ctx.lineTo(sx - 4, sy + 2);
-      ctx.lineTo(sx - 8, sy - 4);
-      ctx.closePath();
-      ctx.fill();
-      ctx.globalAlpha = isUnlocked ? 1 : 0.3;
+        // Crystal base
+        ctx.fillStyle = '#446644';
+        ctx.beginPath();
+        ctx.ellipse(sx, sy + 2, 10, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
 
-      // Sparkle
-      ctx.fillStyle = '#fff';
-      ctx.globalAlpha = isUnlocked ? (0.5 + Math.sin(gameTime * 4 + t.y * 0.01) * 0.3) : 0.1;
-      ctx.beginPath();
-      ctx.arc(sx - 2, sy - 14, 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
+        // Crystal body with green overlay
+        ctx.fillStyle = catColor;
+        ctx.globalAlpha = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 22);
+        ctx.lineTo(sx + 8, sy - 4);
+        ctx.lineTo(sx + 4, sy + 2);
+        ctx.lineTo(sx - 4, sy + 2);
+        ctx.lineTo(sx - 8, sy - 4);
+        ctx.closePath();
+        ctx.fill();
 
-      // Lock icon above locked totems
-      if (!isUnlocked) {
+        // Green tint overlay on crystal
+        ctx.fillStyle = 'rgba(105,240,174,0.35)';
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 22);
+        ctx.lineTo(sx + 8, sy - 4);
+        ctx.lineTo(sx + 4, sy + 2);
+        ctx.lineTo(sx - 4, sy + 2);
+        ctx.lineTo(sx - 8, sy - 4);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.globalAlpha = 1;
+
+        // Green checkmark badge
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#69f0ae';
+        ctx.fillText('\u2713', sx, sy - 28);
+
+      } else if (isUnlocked) {
+        // --- AVAILABLE state: full color + pulsing glow to attract attention ---
+
+        // Pulsing shadow glow
+        ctx.shadowBlur = 10 + Math.sin(gameTime * 3) * 5;
+        ctx.shadowColor = catColor;
+
+        // Glow circle
+        const glowSize = 18 + Math.sin(gameTime * 3 + t.x * 0.01) * 4;
+        ctx.fillStyle = catColor.startsWith('#') ? 'rgba(255,255,255,0.10)' : catColor.replace(')', ', 0.12)').replace('rgb', 'rgba');
+        ctx.beginPath();
+        ctx.arc(sx, sy - 8, glowSize, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Crystal base
+        ctx.fillStyle = '#555';
+        ctx.beginPath();
+        ctx.ellipse(sx, sy + 2, 10, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Crystal body
+        ctx.fillStyle = catColor;
+        ctx.globalAlpha = 0.85;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 22);
+        ctx.lineTo(sx + 8, sy - 4);
+        ctx.lineTo(sx + 4, sy + 2);
+        ctx.lineTo(sx - 4, sy + 2);
+        ctx.lineTo(sx - 8, sy - 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Bright accent border
+        ctx.strokeStyle = catColor;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 22);
+        ctx.lineTo(sx + 8, sy - 4);
+        ctx.lineTo(sx + 4, sy + 2);
+        ctx.lineTo(sx - 4, sy + 2);
+        ctx.lineTo(sx - 8, sy - 4);
+        ctx.closePath();
+        ctx.stroke();
+
+        // Sparkle
+        ctx.fillStyle = '#fff';
+        ctx.globalAlpha = 0.5 + Math.sin(gameTime * 4 + t.y * 0.01) * 0.3;
+        ctx.beginPath();
+        ctx.arc(sx - 2, sy - 14, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        ctx.shadowBlur = 0;
+
+      } else {
+        // --- LOCKED state: grayed out, lock icon, low opacity ---
+        ctx.globalAlpha = 0.3;
+
+        // Glow (dim)
+        ctx.fillStyle = 'rgba(255,255,255,0.05)';
+        ctx.beginPath();
+        ctx.arc(sx, sy - 8, 18, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Crystal base
+        ctx.fillStyle = '#555';
+        ctx.beginPath();
+        ctx.ellipse(sx, sy + 2, 10, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Crystal body
+        ctx.fillStyle = catColor;
+        ctx.globalAlpha = 0.21;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 22);
+        ctx.lineTo(sx + 8, sy - 4);
+        ctx.lineTo(sx + 4, sy + 2);
+        ctx.lineTo(sx - 4, sy + 2);
+        ctx.lineTo(sx - 8, sy - 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 0.3;
+
+        // Sparkle (barely visible)
+        ctx.fillStyle = '#fff';
+        ctx.globalAlpha = 0.1;
+        ctx.beginPath();
+        ctx.arc(sx - 2, sy - 14, 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        // Lock icon
         ctx.font = '14px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('\uD83D\uDD12', sx, sy - 28);
@@ -3748,8 +3917,8 @@
 
       ctx.restore();
 
-      // E hint when player is near (only if unlocked)
-      if (localPlayer && isUnlocked) {
+      // [E] prompt when player is near (only if unlocked but not yet completed)
+      if (localPlayer && isUnlocked && !isCompleted) {
         const dist = Math.hypot(localPlayer.x - t.x, localPlayer.y - t.y);
         if (dist < 120) {
           ctx.font = '600 12px "Segoe UI", system-ui, sans-serif';

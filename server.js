@@ -7,6 +7,9 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
 const { OAuth2Client } = require('google-auth-library');
+const multer = require('multer');
+const pdfParse = require('pdf-parse');
+const OpenAI = require('openai');
 
 const app = express();
 const server = http.createServer(app);
@@ -16,6 +19,24 @@ const io = new Server(server, {
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// PDF Upload configuration
+const UPLOADS_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+const upload = multer({
+  dest: UPLOADS_DIR,
+  limits: { fileSize: 100 * 1024 * 1024, files: 5 },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype === 'application/pdf') cb(null, true);
+    else cb(new Error('Apenas arquivos PDF sao aceitos.'));
+  }
+});
+
+// OpenAI client
+const openaiClient = process.env.OPENAI_API_KEY
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
 
 // --------------- Persistence ---------------
 const DATA_DIR = path.join(__dirname, 'data');
@@ -79,6 +100,7 @@ function defaultUserRecord(email, name, extraFields) {
       totalDuelsLost: 0,
       islandsVisited: []
     },
+    archipelagos: [],
     progression: {
       matematica: 1,
       historia: 1,
@@ -101,36 +123,80 @@ function updateUserData(email, updates) {
 
 function savePlayerProgress(player) {
   if (!player || !player.email) return;
-  const rec = persistedUsers[player.email];
-  if (!rec) return;
-  rec.profile = { xp: player.xp, level: player.level, coins: player.coins };
-  saveData();
+  const archId = player.archipelagoId;
+  if (archId && archId !== 'classic') {
+    const userData = getUserData(player.email);
+    if (!userData) return;
+    const arch = (userData.archipelagos || []).find(a => a.id === archId);
+    if (arch) {
+      arch.profile = { xp: player.xp, level: player.level, coins: player.coins };
+      updateUserData(player.email, { archipelagos: userData.archipelagos });
+    }
+  } else {
+    const rec = persistedUsers[player.email];
+    if (!rec) return;
+    rec.profile = { xp: player.xp, level: player.level, coins: player.coins };
+    saveData();
+  }
 }
 
-function recordQuizResult(player, category, correct, level) {
+function recordQuizResult(player, category, correct, level, source) {
   if (!player || !player.email) return;
-  const rec = persistedUsers[player.email];
-  if (!rec) return;
-  if (!rec.quizHistory) rec.quizHistory = [];
-  rec.quizHistory.push({ category, correct, timestamp: Date.now(), level: level || 1 });
-  // Keep last 200 entries to avoid unbounded growth
-  if (rec.quizHistory.length > 200) rec.quizHistory = rec.quizHistory.slice(-200);
-  if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
-  if (correct) rec.stats.totalCorrect = (rec.stats.totalCorrect || 0) + 1;
-  else rec.stats.totalWrong = (rec.stats.totalWrong || 0) + 1;
-  rec.profile = { xp: player.xp, level: player.level, coins: player.coins };
-  saveData();
+  const archId = player.archipelagoId;
+  const entry = { category, correct, timestamp: Date.now(), level: level || 1, source: source || 'enemy' };
+
+  if (archId && archId !== 'classic') {
+    const userData = getUserData(player.email);
+    if (!userData) return;
+    const arch = (userData.archipelagos || []).find(a => a.id === archId);
+    if (arch) {
+      if (!arch.quizHistory) arch.quizHistory = [];
+      arch.quizHistory.push(entry);
+      if (arch.quizHistory.length > 200) arch.quizHistory = arch.quizHistory.slice(-200);
+      if (!arch.stats) arch.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
+      if (correct) arch.stats.totalCorrect = (arch.stats.totalCorrect || 0) + 1;
+      else arch.stats.totalWrong = (arch.stats.totalWrong || 0) + 1;
+      arch.profile = { xp: player.xp, level: player.level, coins: player.coins };
+      updateUserData(player.email, { archipelagos: userData.archipelagos });
+    }
+  } else {
+    const rec = persistedUsers[player.email];
+    if (!rec) return;
+    if (!rec.quizHistory) rec.quizHistory = [];
+    rec.quizHistory.push(entry);
+    if (rec.quizHistory.length > 200) rec.quizHistory = rec.quizHistory.slice(-200);
+    if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
+    if (correct) rec.stats.totalCorrect = (rec.stats.totalCorrect || 0) + 1;
+    else rec.stats.totalWrong = (rec.stats.totalWrong || 0) + 1;
+    rec.profile = { xp: player.xp, level: player.level, coins: player.coins };
+    saveData();
+  }
 }
 
 function recordDuelResult(player, won) {
   if (!player || !player.email) return;
-  const rec = persistedUsers[player.email];
-  if (!rec) return;
-  if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
-  if (won) rec.stats.totalDuelsWon = (rec.stats.totalDuelsWon || 0) + 1;
-  else rec.stats.totalDuelsLost = (rec.stats.totalDuelsLost || 0) + 1;
-  rec.profile = { xp: player.xp, level: player.level, coins: player.coins };
-  saveData();
+  const archId = player.archipelagoId;
+
+  if (archId && archId !== 'classic') {
+    const userData = getUserData(player.email);
+    if (!userData) return;
+    const arch = (userData.archipelagos || []).find(a => a.id === archId);
+    if (arch) {
+      if (!arch.stats) arch.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
+      if (won) arch.stats.totalDuelsWon = (arch.stats.totalDuelsWon || 0) + 1;
+      else arch.stats.totalDuelsLost = (arch.stats.totalDuelsLost || 0) + 1;
+      arch.profile = { xp: player.xp, level: player.level, coins: player.coins };
+      updateUserData(player.email, { archipelagos: userData.archipelagos });
+    }
+  } else {
+    const rec = persistedUsers[player.email];
+    if (!rec) return;
+    if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
+    if (won) rec.stats.totalDuelsWon = (rec.stats.totalDuelsWon || 0) + 1;
+    else rec.stats.totalDuelsLost = (rec.stats.totalDuelsLost || 0) + 1;
+    rec.profile = { xp: player.xp, level: player.level, coins: player.coins };
+    saveData();
+  }
 }
 
 // Load persisted data on startup
@@ -265,6 +331,249 @@ app.get('/api/user/progress/:email', (req, res) => {
     quizHistory: rec.quizHistory || [],
     stats: rec.stats || {}
   });
+});
+
+// ===============================================================
+//  ARCHIPELAGO REST API
+// ===============================================================
+app.post('/api/archipelago/create', (req, res, next) => {
+  upload.array('files', 5)(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: 'Erro no upload: ' + err.message });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email || !req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'Email e pelo menos um PDF sao obrigatorios.' });
+    }
+
+    if (!openaiClient) {
+      // Clean up files
+      req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch(e) {} });
+      return res.status(500).json({ error: 'API de IA nao configurada. Adicione OPENAI_API_KEY ao .env' });
+    }
+
+    const userData = getUserData(email);
+    if (!userData) {
+      req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch(e) {} });
+      return res.status(404).json({ error: 'Usuario nao encontrado.' });
+    }
+
+    // Rate limit: max 10 archipelagos per user
+    if ((userData.archipelagos || []).length >= 10) {
+      req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch(e) {} });
+      return res.status(429).json({ error: 'Limite de 10 arquipelagos atingido.' });
+    }
+
+    const islandNames = req.body.islandNames ? JSON.parse(req.body.islandNames) : [];
+
+    // Extract text from each PDF using multiple strategies
+    const pdfTexts = [];
+    for (let i = 0; i < req.files.length; i++) {
+      const file = req.files[i];
+      const pdfName = islandNames[i] || file.originalname.replace('.pdf', '');
+      try {
+        const dataBuffer = fs.readFileSync(file.path);
+        let text = '';
+
+        // Strategy 1: pdf-parse
+        try {
+          const pdfData = await pdfParse(dataBuffer);
+          text = pdfData.text || '';
+        } catch (e) { /* continue to fallback */ }
+
+        // Strategy 2: pdfjs-dist (pure JS, handles more PDFs)
+        if (text.trim().length < 50) {
+          try {
+            const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.mjs');
+            const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(dataBuffer) });
+            const pdfDoc = await loadingTask.promise;
+            const pages = Math.min(pdfDoc.numPages, 30); // max 30 pages
+            let extracted = '';
+            for (let p = 1; p <= pages; p++) {
+              const page = await pdfDoc.getPage(p);
+              const content = await page.getTextContent();
+              extracted += content.items.map(item => item.str).join(' ') + '\n';
+            }
+            if (extracted.trim().length > text.trim().length) {
+              text = extracted;
+            }
+          } catch (e) { /* continue */ }
+        }
+
+        // Truncate to ~15000 chars per PDF
+        if (text.length > 15000) text = text.substring(0, 15000);
+
+        if (text.trim().length >= 50) {
+          pdfTexts.push({ name: pdfName, text: text, mode: 'text' });
+        } else {
+          // Strategy 3: use filename as topic and let AI generate content about it
+          pdfTexts.push({ name: pdfName, text: null, mode: 'topic' });
+        }
+      } catch (err) {
+        pdfTexts.push({ name: pdfName, text: null, mode: 'topic' });
+      }
+    }
+
+    // Clean up uploaded files
+    req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch(e) {} });
+
+    // All PDFs are usable (either text extracted or topic-based)
+    const usablePdfs = pdfTexts;
+
+    // Build AI prompt
+    const themes = ['blue', 'green', 'purple', 'brown', 'neon'];
+
+    const systemPrompt = `Voce e um professor especialista em criar material didatico de alta qualidade para um jogo educativo brasileiro chamado Knowlands.
+
+Sua tarefa e analisar profundamente o conteudo dos documentos fornecidos, identificar os topicos-chave, conceitos fundamentais, definicoes, formulas, datas, nomes e relacoes importantes, e transformar tudo isso em perguntas de quiz que realmente testem o conhecimento do estudante sobre O CONTEUDO ESPECIFICO do documento.
+
+REGRAS CRITICAS:
+- As perguntas DEVEM ser especificas ao conteudo do documento, citando dados, nomes, definicoes e fatos EXATOS que aparecem no texto
+- NUNCA faca perguntas genericas ou que possam ser respondidas sem ler o material
+- Cada pergunta deve ter 4 opcoes plausíveis, onde as erradas sejam distratores realistas
+- As perguntas devem cobrir DIFERENTES topicos/secoes do documento, nao repetir o mesmo assunto
+- As mini-licoes devem explicar conceitos-chave DO DOCUMENTO de forma clara e didatica
+
+Responda APENAS com JSON valido, sem explicacao, sem markdown, sem blocos de codigo.`;
+
+    let documentsPrompt = '';
+    usablePdfs.forEach((pdf, i) => {
+      if (pdf.mode === 'text') {
+        documentsPrompt += `\n\n=== DOCUMENTO ${i + 1}: "${pdf.name}" ===\n${pdf.text}\n=== FIM DOCUMENTO ${i + 1} ===\n`;
+      } else if (pdf.mode === 'topic') {
+        documentsPrompt += `\n\n=== DOCUMENTO ${i + 1}: "${pdf.name}" ===\nNao foi possivel extrair o texto. Gere conteudo educativo APROFUNDADO sobre o tema "${pdf.name}", cobrindo os principais topicos, conceitos, formulas e fatos importantes dessa area.\n=== FIM DOCUMENTO ${i + 1} ===\n`;
+      }
+    });
+
+    const instructionText = `Analise profundamente os documentos abaixo e gere conteudo educativo DETALHADO em formato JSON.
+
+Para CADA documento, faca:
+1. PRIMEIRO: identifique os 5-8 topicos/conceitos principais do documento
+2. DEPOIS: crie perguntas que cubram TODOS esses topicos, distribuindo entre os 3 niveis
+
+Para CADA documento, gere:
+- "name": nome curto e tematico (max 25 chars). Use o nome sugerido se houver.
+- "theme": um de ${themes.map(t => '"' + t + '"').join(', ')} (diferente por ilha)
+- "questions": objeto com 3 niveis, cada um com EXATAMENTE 5 perguntas:
+  - "1" (BASICO): Perguntas sobre DEFINICOES e FATOS diretos do texto. O estudante precisa lembrar informacoes especificas.
+    Exemplos: "Segundo o texto, qual e a definicao de X?", "Qual valor/data/nome o documento menciona para Y?"
+  - "2" (INTERMEDIARIO): Perguntas de COMPREENSAO e APLICACAO. O estudante precisa entender relacoes entre conceitos.
+    Exemplos: "Por que X causa Y segundo o documento?", "Qual e a diferenca entre A e B conforme explicado?"
+  - "3" (AVANCADO): Perguntas de ANALISE e SINTESE. O estudante precisa conectar ideias e fazer inferencias.
+    Exemplos: "Com base no conteudo, o que aconteceria se X fosse alterado?", "Qual conclusao pode ser tirada da relacao entre A e B?"
+
+  Formato: { "q": "pergunta especifica?", "options": ["opcao correta", "distrator plausivel 1", "distrator plausivel 2", "distrator plausivel 3"], "answer": 0 }
+  IMPORTANTE: Varie a posicao da resposta correta (answer: 0, 1, 2 ou 3) entre as perguntas!
+
+- "studyTips": array com 5 dicas de estudo PRATICAS e ESPECIFICAS ao conteudo:
+  Exemplos: "Dica: Faca um mapa mental conectando os conceitos de X, Y e Z mencionados no capitulo 2"
+  NAO use dicas genericas como "estude mais" ou "preste atencao"
+
+- "miniLessons": array com 5 paragrafos educativos (3-4 frases cada) que EXPLIQUEM conceitos-chave do documento de forma clara, como um professor explicaria para um aluno. Cada mini-licao deve cobrir um topico DIFERENTE.
+
+FORMATO EXATO DE RESPOSTA:
+{ "islands": [ { "name": "...", "theme": "...", "questions": { "1": [...], "2": [...], "3": [...] }, "studyTips": [...], "miniLessons": [...] } ] }
+
+${documentsPrompt}`;
+
+    const aiResponse = await openaiClient.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 8192,
+      temperature: 0.5,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: instructionText }
+      ]
+    });
+
+    // Parse AI response
+    let aiText = aiResponse.choices[0].message.content;
+    // Try to extract JSON from response
+    const jsonMatch = aiText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      return res.status(500).json({ error: 'Erro ao processar resposta da IA.' });
+    }
+
+    let generated;
+    try {
+      generated = JSON.parse(jsonMatch[0]);
+    } catch (parseErr) {
+      return res.status(500).json({ error: 'Resposta da IA nao e JSON valido.' });
+    }
+
+    if (!generated.islands || !Array.isArray(generated.islands)) {
+      return res.status(500).json({ error: 'Formato de resposta da IA invalido.' });
+    }
+
+    // Build archipelago
+    const archId = 'arch_' + uuidv4().substring(0, 8);
+    const archipelago = {
+      id: archId,
+      name: 'Arquipelago de ' + userData.name,
+      createdAt: Date.now(),
+      islands: generated.islands.map((isl, idx) => ({
+        id: 'custom_' + idx + '_' + archId,
+        name: isl.name || ('Ilha ' + (idx + 1)),
+        theme: isl.theme || themes[idx % themes.length],
+        category: 'custom_' + idx + '_' + archId,
+        questions: isl.questions || { "1": [], "2": [], "3": [] },
+        studyTips: isl.studyTips || [],
+        miniLessons: isl.miniLessons || []
+      })),
+      // Per-archipelago isolated data
+      profile: { xp: 0, level: 1, coins: 0 },
+      quizHistory: [],
+      stats: { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] },
+      notes: {},
+      achievements: [],
+      progression: {}
+    };
+
+    // Initialize per-archipelago notes and progression per island
+    archipelago.islands.forEach(isl => {
+      archipelago.notes[isl.category] = '';
+      archipelago.progression[isl.category] = 1;
+    });
+
+    // Save to user data
+    if (!userData.archipelagos) userData.archipelagos = [];
+    userData.archipelagos.push(archipelago);
+    updateUserData(email, { archipelagos: userData.archipelagos });
+
+    res.json({ ok: true, archipelago });
+
+  } catch (err) {
+    console.error('Archipelago creation error:', err);
+    // Clean up files on error
+    if (req.files) req.files.forEach(f => { try { fs.unlinkSync(f.path); } catch(e) {} });
+    const errMsg = err.message || String(err);
+    res.status(500).json({ error: 'Erro ao criar arquipelago: ' + errMsg });
+  }
+});
+
+app.get('/api/archipelago/list', (req, res) => {
+  const email = req.query.email;
+  if (!email) return res.status(400).json({ error: 'Email obrigatorio.' });
+  const userData = getUserData(email);
+  if (!userData) return res.json({ archipelagos: [] });
+  res.json({ archipelagos: (userData.archipelagos || []).map(a => ({
+    id: a.id, name: a.name, createdAt: a.createdAt,
+    islands: (a.islands || []).map(i => ({ id: i.id, name: i.name, theme: i.theme }))
+  }))});
+});
+
+app.get('/api/archipelago/:id', (req, res) => {
+  const email = req.query.email;
+  if (!email) return res.status(400).json({ error: 'Email obrigatorio.' });
+  const userData = getUserData(email);
+  if (!userData) return res.status(404).json({ error: 'Usuario nao encontrado.' });
+  const arch = (userData.archipelagos || []).find(a => a.id === req.params.id);
+  if (!arch) return res.status(404).json({ error: 'Arquipelago nao encontrado.' });
+  res.json({ archipelago: arch });
 });
 
 // ===============================================================
@@ -422,56 +731,111 @@ const ACHIEVEMENTS = [
 ];
 
 function checkAchievements(email, socketId) {
+  const p = players[socketId];
   const userData = getUserData(email);
   if (!userData) return;
 
-  const history = userData.quizHistory || [];
-  const stats = userData.stats || {};
-  const notes = userData.notes || {};
-  const current = userData.achievements || [];
-  const newAchievements = [];
+  const archId = (p && p.archipelagoId) ? p.archipelagoId : 'classic';
+  let history, stats, notes, currentAchievements, prog;
 
-  // Helper: count correct per category
-  function correctInCat(cat) {
-    return history.filter(q => q.category === cat && q.correct).length;
+  if (archId !== 'classic') {
+    const arch = (userData.archipelagos || []).find(a => a.id === archId);
+    if (!arch) return;
+    history = arch.quizHistory || [];
+    stats = arch.stats || {};
+    notes = arch.notes || {};
+    currentAchievements = arch.achievements || [];
+    prog = arch.progression || {};
+  } else {
+    history = userData.quizHistory || [];
+    stats = userData.stats || {};
+    notes = userData.notes || {};
+    currentAchievements = userData.achievements || [];
+    prog = userData.progression || {};
   }
 
+  const newAchievements = [];
+
+  // Universal achievement checks
   const checks = {
     'first_correct': () => (stats.totalCorrect || 0) >= 1,
     'first_duel_win': () => (stats.totalDuelsWon || 0) >= 1,
-    'math_5': () => correctInCat('matematica') >= 5,
-    'math_20': () => correctInCat('matematica') >= 20,
-    'hist_5': () => correctInCat('historia') >= 5,
-    'hist_20': () => correctInCat('historia') >= 20,
-    'sci_5': () => correctInCat('ciencias') >= 5,
-    'sci_20': () => correctInCat('ciencias') >= 20,
-    'lang_5': () => correctInCat('linguas') >= 5,
-    'lang_20': () => correctInCat('linguas') >= 20,
-    'prog_5': () => correctInCat('programacao') >= 5,
-    'prog_20': () => correctInCat('programacao') >= 20,
     'correct_10': () => (stats.totalCorrect || 0) >= 10,
     'correct_50': () => (stats.totalCorrect || 0) >= 50,
-    'correct_100': () => (stats.totalCorrect || 0) >= 100,
-    'level_5': () => (userData.profile && userData.profile.level >= 5) || false,
-    'level_10': () => (userData.profile && userData.profile.level >= 10) || false,
     'duels_5': () => (stats.totalDuelsWon || 0) >= 5,
-    'duels_10': () => (stats.totalDuelsWon || 0) >= 10,
-    'chest_opener': () => history.filter(q => q.source === 'chest' && q.correct).length >= 10,
-    'explorer': () => ((stats.islandsVisited || []).length) >= 6,
-    'noter': () => Object.values(notes).filter(n => n && n.trim().length > 0).length >= 5,
+    'level_5': () => (p && p.level >= 5) || false,
+    'level_10': () => (p && p.level >= 10) || false,
   };
 
+  if (archId !== 'classic') {
+    // Dynamic per-island achievements for custom archipelago
+    const arch = (userData.archipelagos || []).find(a => a.id === archId);
+    if (arch && arch.islands) {
+      arch.islands.forEach((isl, idx) => {
+        const cat = isl.category;
+        checks['island_' + idx + '_5'] = () => history.filter(q => q.category === cat && q.correct).length >= 5;
+        checks['island_' + idx + '_master'] = () => (prog[cat] || 1) >= 3;
+      });
+      checks['all_mastered'] = () => arch.islands.every(isl => (prog[isl.category] || 1) >= 3);
+      checks['noter'] = () => arch.islands.every(isl => notes[isl.category] && notes[isl.category].trim().length > 0);
+    }
+  } else {
+    // Classic-mode achievements
+    function correctInCat(cat) { return history.filter(q => q.category === cat && q.correct).length; }
+    checks['math_5'] = () => correctInCat('matematica') >= 5;
+    checks['math_20'] = () => correctInCat('matematica') >= 20;
+    checks['hist_5'] = () => correctInCat('historia') >= 5;
+    checks['hist_20'] = () => correctInCat('historia') >= 20;
+    checks['sci_5'] = () => correctInCat('ciencias') >= 5;
+    checks['sci_20'] = () => correctInCat('ciencias') >= 20;
+    checks['lang_5'] = () => correctInCat('linguas') >= 5;
+    checks['lang_20'] = () => correctInCat('linguas') >= 20;
+    checks['prog_5'] = () => correctInCat('programacao') >= 5;
+    checks['prog_20'] = () => correctInCat('programacao') >= 20;
+    checks['correct_100'] = () => (stats.totalCorrect || 0) >= 100;
+    checks['duels_10'] = () => (stats.totalDuelsWon || 0) >= 10;
+    checks['chest_opener'] = () => history.filter(q => q.source === 'chest' && q.correct).length >= 10;
+    checks['explorer'] = () => (stats.islandsVisited || []).length >= 6;
+    checks['noter'] = () => Object.values(notes).filter(n => n && n.trim().length > 0).length >= 5;
+  }
+
   for (const [id, check] of Object.entries(checks)) {
-    if (!current.includes(id) && check()) {
-      current.push(id);
+    if (!currentAchievements.includes(id) && check()) {
+      currentAchievements.push(id);
       newAchievements.push(id);
     }
   }
 
   if (newAchievements.length > 0) {
-    updateUserData(email, { achievements: current });
+    if (archId !== 'classic') {
+      const arch = (userData.archipelagos || []).find(a => a.id === archId);
+      if (arch) {
+        arch.achievements = currentAchievements;
+        updateUserData(email, { archipelagos: userData.archipelagos });
+      }
+    } else {
+      updateUserData(email, { achievements: currentAchievements });
+    }
+
     newAchievements.forEach(achId => {
-      const ach = ACHIEVEMENTS.find(a => a.id === achId);
+      let ach = ACHIEVEMENTS.find(a => a.id === achId);
+      if (!ach && archId !== 'classic') {
+        // Build dynamic achievement label for custom archipelago
+        const archData = (userData.archipelagos || []).find(a => a.id === archId);
+        if (achId === 'all_mastered') {
+          ach = { id: achId, name: 'Mestre Total', desc: 'Completou todos os niveis em todas as ilhas!', icon: '👑', category: 'geral' };
+        } else if (achId === 'noter') {
+          ach = { id: achId, name: 'Anotador', desc: 'Escreveu notas em todas as materias', icon: '✏️', category: 'geral' };
+        } else if (achId.startsWith('island_') && achId.endsWith('_5')) {
+          const idx = parseInt(achId.split('_')[1]);
+          const islName = archData && archData.islands[idx] ? archData.islands[idx].name : 'Ilha ' + (idx + 1);
+          ach = { id: achId, name: 'Estudante de ' + islName, desc: 'Acertou 5 perguntas em ' + islName, icon: '📚', category: 'ilha' };
+        } else if (achId.startsWith('island_') && achId.endsWith('_master')) {
+          const idx = parseInt(achId.split('_')[1]);
+          const islName = archData && archData.islands[idx] ? archData.islands[idx].name : 'Ilha ' + (idx + 1);
+          ach = { id: achId, name: 'Mestre de ' + islName, desc: 'Completou todos os niveis em ' + islName, icon: '🏆', category: 'ilha' };
+        }
+      }
       if (ach) {
         io.to(socketId).emit('achievementUnlocked', ach);
       }
@@ -874,34 +1238,92 @@ function randomSpawnOnIsland() {
   };
 }
 
-function getRandomQuestion(category, level) {
+function getRandomQuestion(category, level, player) {
   level = level || 1;
-  const pool = questions[category];
-  if (!pool) return null;
-  const levelPool = pool[level];
-  if (!levelPool || levelPool.length === 0) return null;
-  const idx = Math.floor(Math.random() * levelPool.length);
-  return { index: idx, level: level, ...levelPool[idx] };
+  let pool = null;
+
+  // Get the question pool (custom archipelago takes priority)
+  if (player && player.customArch) {
+    const customIsland = player.customArch.islands.find(i => i.category === category);
+    if (customIsland && customIsland.questions && customIsland.questions[level]) {
+      pool = customIsland.questions[level];
+    }
+  }
+  if (!pool) {
+    const catPool = questions[category];
+    if (!catPool) return null;
+    pool = catPool[level];
+    if (!pool || pool.length === 0) return null;
+  }
+
+  // Filter out recently asked questions to avoid repeats
+  let filteredPool = pool;
+  if (player && player.recentQuestions) {
+    const available = pool.filter((q, idx) => {
+      const key = category + '_' + level + '_' + idx;
+      return !player.recentQuestions.has(key);
+    });
+    // If all questions have been asked, reset history and use full pool
+    if (available.length === 0) {
+      player.recentQuestions.clear();
+    } else {
+      filteredPool = available;
+    }
+  }
+
+  const idx = Math.floor(Math.random() * filteredPool.length);
+  const question = filteredPool[idx];
+
+  // Find the original index in the full pool for consistent tracking
+  let originalIdx = pool.indexOf(question);
+  if (originalIdx === -1) originalIdx = idx;
+
+  // Track this question so it won't repeat soon
+  if (player && player.recentQuestions) {
+    const key = category + '_' + level + '_' + originalIdx;
+    player.recentQuestions.add(key);
+  }
+
+  return { index: originalIdx, level: level, ...question };
 }
 
-function checkProgression(email, category) {
+function checkProgression(email, category, archId) {
   const userData = getUserData(email);
   if (!userData || !category) return;
-  if (!userData.progression) {
-    userData.progression = { matematica: 1, historia: 1, ciencias: 1, linguas: 1, programacao: 1 };
+
+  let prog, history;
+  if (archId && archId !== 'classic') {
+    const arch = (userData.archipelagos || []).find(a => a.id === archId);
+    if (!arch) return;
+    prog = arch.progression || {};
+    history = arch.quizHistory || [];
+  } else {
+    if (!userData.progression) {
+      userData.progression = { matematica: 1, historia: 1, ciencias: 1, linguas: 1, programacao: 1 };
+    }
+    prog = userData.progression;
+    history = userData.quizHistory || [];
   }
-  const prog = userData.progression;
+
   const currentLevel = prog[category] || 1;
   if (currentLevel >= 3) return null; // already maxed
 
   // Count correct answers at current level for this category
-  const correctAtLevel = (userData.quizHistory || []).filter(
+  const correctAtLevel = history.filter(
     q => q.category === category && q.correct && q.level === currentLevel
   ).length;
 
   if (correctAtLevel >= 3) {
     prog[category] = currentLevel + 1;
-    updateUserData(email, { progression: prog });
+    if (archId && archId !== 'classic') {
+      const arch = (userData.archipelagos || []).find(a => a.id === archId);
+      if (arch) {
+        arch.progression = prog;
+        updateUserData(email, { archipelagos: userData.archipelagos });
+      }
+    } else {
+      updateUserData(email, { progression: prog });
+    }
     return currentLevel + 1; // return new level
   }
   return null;
@@ -1184,12 +1606,26 @@ function gameTick() {
         // Instead of direct damage, trigger quiz for the shooter
         const shooter = players[b.ownerId];
         if (shooter && !activeQuizzes[b.ownerId]) {
-          const category = getCategoryForEnemy(e);
+          let category;
+          if (shooter.customArch) {
+            // Pick a random category from the custom archipelago instead of
+            // looking up the global islands array (which won't have custom ones)
+            const customCats = shooter.customArch.islands.map(i => i.category);
+            category = customCats[Math.floor(Math.random() * customCats.length)];
+          } else {
+            category = getCategoryForEnemy(e);
+          }
           const shooterEmail = shooter.email;
           const shooterData = shooterEmail ? getUserData(shooterEmail) : null;
-          const shooterProg = shooterData && shooterData.progression ? shooterData.progression : {};
+          let shooterProg = {};
+          if (shooter.archipelagoId && shooter.archipelagoId !== 'classic' && shooterData) {
+            const shooterArch = (shooterData.archipelagos || []).find(a => a.id === shooter.archipelagoId);
+            shooterProg = shooterArch && shooterArch.progression ? shooterArch.progression : {};
+          } else if (shooterData && shooterData.progression) {
+            shooterProg = shooterData.progression;
+          }
           const qLevel = shooterProg[category] || 1;
-          const question = getRandomQuestion(category, qLevel);
+          const question = getRandomQuestion(category, qLevel, players[b.ownerId]);
           if (question) {
             activeQuizzes[b.ownerId] = {
               enemyId: eid,
@@ -1197,7 +1633,8 @@ function gameTick() {
               category: category,
               level: question.level,
               correctAnswer: question.answer,
-              timestamp: now
+              timestamp: now,
+              questionData: question
             };
             io.to(b.ownerId).emit('quizStart', {
               enemyId: eid,
@@ -1229,11 +1666,7 @@ function gameTick() {
         player.health -= 15;
         if (player.health < 0) player.health = 0;
         const correctIdx = quiz.correctAnswer;
-        const category = quiz.category;
-        const qLvl = quiz.level || 1;
-        const pool = questions[category];
-        const levelPool = pool ? pool[qLvl] : null;
-        const correctText = levelPool && levelPool[quiz.questionIndex] ? levelPool[quiz.questionIndex].options[correctIdx] : '';
+        const correctText = quiz.questionData ? quiz.questionData.options[correctIdx] : '';
         io.to(sid).emit('quizResult', {
           correct: false,
           xp: 0,
@@ -1297,26 +1730,210 @@ setInterval(() => {
 }, 1000 / 15);
 
 // ===============================================================
+//  CUSTOM MAP GENERATOR
+// ===============================================================
+function generateCustomMap(arch) {
+  const islandCount = Math.min(arch.islands.length, 5);
+  const centerX = 3000, centerY = 3000;
+  const radius = 1800;
+
+  // Reusable polygon template (normalized, will be scaled by rx/ry)
+  const polyTemplate = [
+    {x:-0.92,y:-0.13},{x:-0.82,y:-0.50},{x:-0.53,y:-0.74},{x:-0.16,y:-0.82},
+    {x:0.21,y:-0.77},{x:0.53,y:-0.69},{x:0.82,y:-0.53},{x:0.95,y:-0.21},
+    {x:0.98,y:0.13},{x:0.90,y:0.42},{x:0.74,y:0.63},{x:0.42,y:0.79},
+    {x:0.08,y:0.74},{x:-0.26,y:0.82},{x:-0.58,y:0.69},{x:-0.87,y:0.45},
+    {x:-0.98,y:0.16}
+  ];
+
+  const customIslands = [];
+  const customBridges = [];
+
+  // Place subject islands in a circle
+  for (let i = 0; i < islandCount; i++) {
+    const angle = (i / islandCount) * Math.PI * 2 - Math.PI / 2;
+    const ix = Math.round(centerX + Math.cos(angle) * radius);
+    const iy = Math.round(centerY + Math.sin(angle) * radius);
+    const rx = 608, ry = 512;
+
+    const themes = ['blue', 'green', 'purple', 'brown', 'neon'];
+    const archIsland = arch.islands[i];
+
+    customIslands.push({
+      id: archIsland.category,
+      name: archIsland.name,
+      x: ix, y: iy, rx: rx, ry: ry,
+      category: archIsland.category,
+      theme: archIsland.theme || themes[i % themes.length],
+      points: polyTemplate.map(p => ({ x: Math.round(p.x * rx), y: Math.round(p.y * ry) }))
+    });
+  }
+
+  // Central island
+  customIslands.push({
+    id: 'central', name: 'Ilha Central',
+    x: centerX, y: centerY, rx: 720, ry: 608,
+    category: null, theme: 'gold',
+    points: polyTemplate.map(p => ({ x: Math.round(p.x * 720), y: Math.round(p.y * 608) }))
+  });
+
+  // Bridges: ring + spokes
+  for (let i = 0; i < islandCount; i++) {
+    const next = (i + 1) % islandCount;
+    if (islandCount > 1) {
+      customBridges.push({ from: customIslands[i].id, to: customIslands[next].id });
+    }
+    customBridges.push({ from: customIslands[i].id, to: 'central' });
+  }
+
+  // Totems (3 zones per island + central)
+  const customTotems = [];
+  customIslands.forEach(isl => {
+    if (!isl.category) {
+      // Central: one totem per custom category
+      arch.islands.forEach((ai, idx) => {
+        const a = (idx / arch.islands.length) * Math.PI * 2;
+        customTotems.push({
+          id: 'totem_central_' + idx, x: isl.x + Math.cos(a) * isl.rx * 0.5,
+          y: isl.y + Math.sin(a) * isl.ry * 0.5,
+          category: ai.category, island: isl.id, zone: 1
+        });
+      });
+    } else {
+      // Zone 1
+      for (let j = 0; j < 2; j++) {
+        const a = (j/2)*Math.PI*2+0.3;
+        customTotems.push({ id:'totem_'+isl.id+'_z1_'+j, x:isl.x+Math.cos(a)*isl.rx*0.7, y:isl.y+Math.sin(a)*isl.ry*0.7, category:isl.category, island:isl.id, zone:1 });
+      }
+      // Zone 2
+      for (let j = 0; j < 2; j++) {
+        const a = (j/2)*Math.PI*2+1.2;
+        customTotems.push({ id:'totem_'+isl.id+'_z2_'+j, x:isl.x+Math.cos(a)*isl.rx*0.45, y:isl.y+Math.sin(a)*isl.ry*0.45, category:isl.category, island:isl.id, zone:2 });
+      }
+      // Zone 3
+      customTotems.push({ id:'totem_'+isl.id+'_z3_0', x:isl.x, y:isl.y, category:isl.category, island:isl.id, zone:3 });
+    }
+  });
+
+  // Chests
+  const customChests = [];
+  customIslands.forEach(isl => {
+    if (!isl.category) return;
+    [{ z:1, r:0.65, a:1.2 }, { z:2, r:0.4, a:2.5 }, { z:3, r:0.15, a:0.8 }].forEach((cfg, j) => {
+      customChests.push({
+        id:'chest_'+isl.id+'_'+j, x:isl.x+Math.cos(cfg.a)*isl.rx*cfg.r,
+        y:isl.y+Math.sin(cfg.a)*isl.ry*cfg.r,
+        category:isl.category, island:isl.id, zone:cfg.z,
+        openedBy:{}, respawnTime:60000
+      });
+    });
+  });
+
+  // Signs
+  const customSigns = [];
+  customIslands.forEach(isl => {
+    if (!isl.category) return;
+    [{r:0.65,a:2.0,z:1}, {r:0.38,a:3.5,z:2}].forEach((cfg, j) => {
+      customSigns.push({
+        id:'sign_'+isl.id+'_'+j, x:isl.x+Math.cos(cfg.a)*isl.rx*cfg.r,
+        y:isl.y+Math.sin(cfg.a)*isl.ry*cfg.r,
+        category:isl.category, island:isl.id, tipIndex:j, zone:cfg.z
+      });
+    });
+  });
+
+  // Portals on central
+  const centralIsl = customIslands.find(i => i.id === 'central');
+  const customPortals = [];
+  arch.islands.forEach((ai, idx) => {
+    const a = (idx / arch.islands.length) * Math.PI * 2 - Math.PI/2;
+    const target = customIslands.find(i => i.id === ai.category);
+    if (target) {
+      customPortals.push({
+        id: 'portal_' + ai.category,
+        x: centralIsl.x + Math.cos(a) * 250,
+        y: centralIsl.y + Math.sin(a) * 250,
+        category: ai.category,
+        targetX: target.x, targetY: target.y,
+        label: ai.name
+      });
+    }
+  });
+
+  return {
+    islands: customIslands, bridges: customBridges, totems: customTotems,
+    chests: customChests, infoSigns: customSigns, portals: customPortals
+  };
+}
+
+// ===============================================================
 //  SOCKET.IO
 // ===============================================================
 io.on('connection', (socket) => {
   console.log('Player connected:', socket.id);
 
   socket.on('join', (data) => {
-    const spawn = randomSpawnOnIsland();
     const color = nextColor();
     const validChars = ['luna', 'blaze', 'coral', 'pixel', 'flora'];
     const charId = validChars.includes(data.characterId) ? data.characterId : 'luna';
 
     // Load persisted profile if available
-    const email = data.email || null;
-    const rec = email ? getUserData(email) : null;
-    const profile = rec && rec.profile ? rec.profile : { xp: 0, level: 1, coins: 0 };
+    const playerEmail = data.email || null;
+    const rec = playerEmail ? getUserData(playerEmail) : null;
+
+    // Check for custom archipelago FIRST to determine spawn point and load correct profile
+    const archId = data.archipelagoId || 'classic';
+
+    let profile;
+    let playerProgression;
+    let playerAchievements;
+    if (archId !== 'classic' && rec) {
+      const arch = (rec.archipelagos || []).find(a => a.id === archId);
+      profile = arch && arch.profile ? arch.profile : { xp: 0, level: 1, coins: 0 };
+      playerProgression = arch && arch.progression ? arch.progression : {};
+      playerAchievements = arch && arch.achievements ? arch.achievements : [];
+    } else {
+      profile = rec && rec.profile ? rec.profile : { xp: 0, level: 1, coins: 0 };
+      playerProgression = rec && rec.progression ? rec.progression : { matematica: 1, historia: 1, ciencias: 1, linguas: 1, programacao: 1 };
+      playerAchievements = rec && rec.achievements ? rec.achievements : [];
+    }
+
+    let gameIslands = islands;
+    let gameBridges = bridges;
+    let gameTotems = totems;
+    let gameChests = chests;
+    let gameInfoSigns = infoSigns;
+    let gamePortals = portals;
+    let customResult = null;
+
+    if (archId !== 'classic' && playerEmail) {
+      const archUserData = getUserData(playerEmail);
+      const arch = archUserData ? (archUserData.archipelagos || []).find(a => a.id === archId) : null;
+      if (arch && arch.islands && arch.islands.length > 0) {
+        customResult = generateCustomMap(arch);
+        gameIslands = customResult.islands;
+        gameBridges = customResult.bridges;
+        gameTotems = customResult.totems;
+        gameChests = customResult.chests;
+        gameInfoSigns = customResult.infoSigns;
+        gamePortals = customResult.portals;
+      }
+    }
+
+    // Spawn on the correct map (custom or classic)
+    let spawn;
+    if (customResult) {
+      // Spawn on central island of custom map
+      const centralIsl = gameIslands.find(i => i.id === 'central');
+      spawn = centralIsl ? { x: centralIsl.x, y: centralIsl.y } : { x: 3000, y: 3000 };
+    } else {
+      spawn = randomSpawnOnIsland();
+    }
 
     players[socket.id] = {
       id: socket.id,
       name: data.name || 'Jogador',
-      email: email,
+      email: playerEmail,
       characterId: charId,
       x: spawn.x,
       y: spawn.y,
@@ -1327,23 +1944,38 @@ io.on('connection', (socket) => {
       level: profile.level || 1,
       coins: profile.coins || 0,
       direction: 'down',
-      isMoving: false
+      isMoving: false,
+      recentQuestions: new Set()
     };
+
+    players[socket.id].archipelagoId = archId;
+
+    if (customResult) {
+      players[socket.id].customArch = (function() {
+        const archUserData = getUserData(playerEmail);
+        return archUserData ? (archUserData.archipelagos || []).find(a => a.id === archId) : null;
+      })();
+      players[socket.id].customTotems = customResult.totems;
+      players[socket.id].customChests = customResult.chests;
+      players[socket.id].customSigns = customResult.infoSigns;
+      players[socket.id].customPortals = customResult.portals;
+      players[socket.id].customIslands = customResult.islands;
+    }
 
     socket.emit('init', {
       id: socket.id,
       player: players[socket.id],
-      islands,
-      bridges,
-      totems,
-      chests: chests.map(c => ({ id: c.id, x: c.x, y: c.y, category: c.category, island: c.island, zone: c.zone || 1 })),
-      infoSigns,
-      portals,
+      islands: gameIslands,
+      bridges: gameBridges,
+      totems: gameTotems,
+      chests: gameChests.map(c => ({ id: c.id, x: c.x, y: c.y, category: c.category, island: c.island, zone: c.zone || 1 })),
+      infoSigns: gameInfoSigns,
+      portals: gamePortals,
       mapW: MAP_W,
       mapH: MAP_H,
       allAchievements: ACHIEVEMENTS,
-      unlockedAchievements: (rec && rec.achievements) ? rec.achievements : [],
-      progression: (rec && rec.progression) ? rec.progression : { matematica: 1, historia: 1, ciencias: 1, linguas: 1, programacao: 1 }
+      unlockedAchievements: playerAchievements,
+      progression: playerProgression
     });
 
     io.emit('playerCount', { count: Object.keys(players).length });
@@ -1356,12 +1988,64 @@ io.on('connection', (socket) => {
     const newX = Math.max(0, Math.min(MAP_W, data.x));
     const newY = Math.max(0, Math.min(MAP_H, data.y));
 
-    // Only allow movement to land or bridges
-    if (isOnLand(newX, newY)) {
+    // Use custom islands for land check if player is on custom archipelago
+    const playerIslands = p.customIslands || islands;
+    const playerBridges = p.customIslands ? bridges.concat([]) : bridges;
+
+    // Check land using player's map
+    let onLand = false;
+    // Check islands
+    for (const isl of playerIslands) {
+      if (isl.points) {
+        const absPoints = isl.points.map(pt => ({ x: isl.x + pt.x, y: isl.y + pt.y }));
+        if (pointInPolygon(newX, newY, absPoints)) { onLand = true; break; }
+      }
+    }
+    // Check bridges if not on island
+    if (!onLand) {
+      for (const br of (p.customIslands ? [] : bridges)) {
+        const fromIsl = playerIslands.find(i => i.id === br.from);
+        const toIsl = playerIslands.find(i => i.id === br.to);
+        if (!fromIsl || !toIsl) continue;
+        const dx = toIsl.x - fromIsl.x;
+        const dy = toIsl.y - fromIsl.y;
+        const len = Math.hypot(dx, dy);
+        const nx = dx / len; const ny = dy / len;
+        const px = newX - fromIsl.x; const py = newY - fromIsl.y;
+        const proj = px * nx + py * ny;
+        if (proj < 0 || proj > len) continue;
+        if (Math.abs(px * (-ny) + py * nx) < 40) { onLand = true; break; }
+      }
+    }
+    // Also check global bridges for custom maps (bridges between custom islands)
+    if (!onLand && p.customIslands) {
+      // Generate bridges for the custom map
+      const customBridgeList = [];
+      const numCustom = playerIslands.filter(i => i.id !== 'central').length;
+      for (let ci = 0; ci < numCustom; ci++) {
+        const nextIdx = (ci + 1) % numCustom;
+        if (numCustom > 1) customBridgeList.push({ from: playerIslands[ci].id, to: playerIslands[nextIdx].id });
+        customBridgeList.push({ from: playerIslands[ci].id, to: 'central' });
+      }
+      for (const br of customBridgeList) {
+        const fromIsl = playerIslands.find(i => i.id === br.from);
+        const toIsl = playerIslands.find(i => i.id === br.to);
+        if (!fromIsl || !toIsl) continue;
+        const dx = toIsl.x - fromIsl.x;
+        const dy = toIsl.y - fromIsl.y;
+        const len = Math.hypot(dx, dy);
+        const nx = dx / len; const ny = dy / len;
+        const px = newX - fromIsl.x; const py = newY - fromIsl.y;
+        const proj = px * nx + py * ny;
+        if (proj < 0 || proj > len) continue;
+        if (Math.abs(px * (-ny) + py * nx) < 40) { onLand = true; break; }
+      }
+    }
+
+    if (onLand) {
       p.x = newX;
       p.y = newY;
     }
-    // If not on land, don't update position (player stays where they were)
 
     p.direction = data.direction || p.direction;
     p.isMoving = data.isMoving || false;
@@ -1370,14 +2054,28 @@ io.on('connection', (socket) => {
     if (p.email) {
       const curIsland = getIslandAt(p.x, p.y);
       if (curIsland) {
-        const rec = persistedUsers[p.email];
-        if (rec) {
-          if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
-          if (!rec.stats.islandsVisited) rec.stats.islandsVisited = [];
-          if (!rec.stats.islandsVisited.includes(curIsland.id)) {
-            rec.stats.islandsVisited.push(curIsland.id);
-            saveData();
-            checkAchievements(p.email, socket.id);
+        const visitUserData = getUserData(p.email);
+        if (visitUserData) {
+          const archId = p.archipelagoId;
+          if (archId && archId !== 'classic') {
+            const arch = (visitUserData.archipelagos || []).find(a => a.id === archId);
+            if (arch) {
+              if (!arch.stats) arch.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
+              if (!arch.stats.islandsVisited) arch.stats.islandsVisited = [];
+              if (!arch.stats.islandsVisited.includes(curIsland.id)) {
+                arch.stats.islandsVisited.push(curIsland.id);
+                updateUserData(p.email, { archipelagos: visitUserData.archipelagos });
+                checkAchievements(p.email, socket.id);
+              }
+            }
+          } else {
+            if (!visitUserData.stats) visitUserData.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
+            if (!visitUserData.stats.islandsVisited) visitUserData.stats.islandsVisited = [];
+            if (!visitUserData.stats.islandsVisited.includes(curIsland.id)) {
+              visitUserData.stats.islandsVisited.push(curIsland.id);
+              saveData();
+              checkAchievements(p.email, socket.id);
+            }
           }
         }
       }
@@ -1422,9 +2120,7 @@ io.on('connection', (socket) => {
     const correct = data.answerIndex === quiz.correctAnswer;
     const category = quiz.category;
     const qLvl = quiz.level || 1;
-    const pool = questions[category];
-    const levelPool = pool ? pool[qLvl] : null;
-    const correctText = levelPool && levelPool[quiz.questionIndex] ? levelPool[quiz.questionIndex].options[quiz.correctAnswer] : '';
+    const correctText = quiz.questionData ? quiz.questionData.options[quiz.correctAnswer] : '';
 
     // Chest quizzes give 2x rewards (30 XP + 10 coins)
     const isChest = !!quiz.isChest;
@@ -1449,23 +2145,13 @@ io.on('connection', (socket) => {
           correctAnswer: correctText, health: p.health, killed: false,
           isChest: true, bonus: '2x'
         });
-        // Record in quizHistory with source and level
+        // Record chest quiz result
+        recordQuizResult(p, category, true, qLvl, 'chest');
         if (p.email) {
-          const rec = persistedUsers[p.email];
-          if (rec) {
-            if (!rec.quizHistory) rec.quizHistory = [];
-            rec.quizHistory.push({ category, correct: true, timestamp: Date.now(), source: 'chest', level: qLvl });
-            if (rec.quizHistory.length > 200) rec.quizHistory = rec.quizHistory.slice(-200);
-            if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
-            rec.stats.totalCorrect = (rec.stats.totalCorrect || 0) + 1;
-            rec.profile = { xp: p.xp, level: p.level, coins: p.coins };
-            saveData();
-            checkAchievements(p.email, socket.id);
-            // Check progression
-            const newProgLevel = checkProgression(p.email, category);
-            if (newProgLevel) {
-              socket.emit('progressionUnlock', { category, newLevel: newProgLevel });
-            }
+          checkAchievements(p.email, socket.id);
+          const newProgLevel = checkProgression(p.email, category, p.archipelagoId);
+          if (newProgLevel) {
+            socket.emit('progressionUnlock', { category, newLevel: newProgLevel });
           }
         }
       } else {
@@ -1524,11 +2210,10 @@ io.on('connection', (socket) => {
             correctAnswer: correctText, health: p.health, killed: false
           });
         }
-        recordQuizResult(p, category, true, qLvl);
+        recordQuizResult(p, category, true, qLvl, 'enemy');
         if (p.email) {
           checkAchievements(p.email, socket.id);
-          // Check progression
-          const newProgLevel = checkProgression(p.email, category);
+          const newProgLevel = checkProgression(p.email, category, p.archipelagoId);
           if (newProgLevel) {
             socket.emit('progressionUnlock', { category, newLevel: newProgLevel });
           }
@@ -1547,20 +2232,7 @@ io.on('connection', (socket) => {
         io.to(socket.id).emit('dead');
         io.emit('killfeed', { text: p.name + ' foi derrotado!' });
       }
-      if (!isChest) recordQuizResult(p, category, false, qLvl);
-      else {
-        if (p.email) {
-          const rec = persistedUsers[p.email];
-          if (rec) {
-            if (!rec.quizHistory) rec.quizHistory = [];
-            rec.quizHistory.push({ category, correct: false, timestamp: Date.now(), source: 'chest', level: qLvl });
-            if (rec.quizHistory.length > 200) rec.quizHistory = rec.quizHistory.slice(-200);
-            if (!rec.stats) rec.stats = { totalCorrect: 0, totalWrong: 0, totalDuelsWon: 0, totalDuelsLost: 0, islandsVisited: [] };
-            rec.stats.totalWrong = (rec.stats.totalWrong || 0) + 1;
-            saveData();
-          }
-        }
-      }
+      recordQuizResult(p, category, false, qLvl, isChest ? 'chest' : 'enemy');
     }
 
     delete activeQuizzes[socket.id];
@@ -1571,20 +2243,29 @@ io.on('connection', (socket) => {
     if (!p || p.health <= 0) return;
     if (activeQuizzes[socket.id]) return;
 
-    const totem = totems.find(t => t.id === data.totemId);
+    const totemPool = p.customTotems || totems;
+    const totem = totemPool.find(t => t.id === data.totemId);
     if (!totem) return;
 
     // Check distance
     const dist = Math.hypot(p.x - totem.x, p.y - totem.y);
     if (dist > 120) return;
 
+    // Resolve progression for this player (per-archipelago or classic)
+    const totemPlayerEmail = p.email;
+    const totemUserData = totemPlayerEmail ? getUserData(totemPlayerEmail) : null;
+    let totemProg = {};
+    if (p.archipelagoId && p.archipelagoId !== 'classic' && totemUserData) {
+      const totemArch = (totemUserData.archipelagos || []).find(a => a.id === p.archipelagoId);
+      totemProg = totemArch && totemArch.progression ? totemArch.progression : {};
+    } else if (totemUserData && totemUserData.progression) {
+      totemProg = totemUserData.progression;
+    }
+
     // Zone locking: check if player has unlocked this zone
     const totemZone = totem.zone || 1;
     if (totemZone > 1) {
-      const playerEmail = p.email;
-      const userData = playerEmail ? getUserData(playerEmail) : null;
-      const prog = userData && userData.progression ? userData.progression : {};
-      const playerLevel = prog[totem.category] || 1;
+      const playerLevel = totemProg[totem.category] || 1;
       if (playerLevel < totemZone) {
         socket.emit('zoneLocked', { zone: totemZone, category: totem.category, required: totemZone });
         return;
@@ -1592,11 +2273,8 @@ io.on('connection', (socket) => {
     }
 
     // Use player's progression level for question
-    const playerEmail = p.email;
-    const userData = playerEmail ? getUserData(playerEmail) : null;
-    const prog = userData && userData.progression ? userData.progression : {};
-    const qLevel = prog[totem.category] || 1;
-    const question = getRandomQuestion(totem.category, qLevel);
+    const qLevel = totemProg[totem.category] || 1;
+    const question = getRandomQuestion(totem.category, qLevel, p);
     if (!question) return;
 
     activeQuizzes[socket.id] = {
@@ -1606,12 +2284,22 @@ io.on('connection', (socket) => {
       category: totem.category,
       level: question.level,
       correctAnswer: question.answer,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      questionData: question
     };
 
-    // Pick a random mini-lesson for this category
-    const lessons = miniLessons[totem.category] || [];
-    const miniLesson = lessons.length > 0 ? lessons[Math.floor(Math.random() * lessons.length)] : null;
+    // Pick a random mini-lesson for this category (custom arch first)
+    let miniLesson = '';
+    if (p.customArch) {
+      const customIsland = p.customArch.islands.find(i => i.category === totem.category);
+      if (customIsland && customIsland.miniLessons) {
+        miniLesson = customIsland.miniLessons[Math.floor(Math.random() * customIsland.miniLessons.length)];
+      }
+    }
+    if (!miniLesson) {
+      const lessons = miniLessons[totem.category] || [];
+      miniLesson = lessons.length > 0 ? lessons[Math.floor(Math.random() * lessons.length)] : null;
+    }
 
     io.to(socket.id).emit('quizStart', {
       enemyId: null,
@@ -1631,7 +2319,8 @@ io.on('connection', (socket) => {
     if (!p || p.health <= 0) return;
     if (activeQuizzes[socket.id]) return;
 
-    const chest = chests.find(c => c.id === data.chestId);
+    const chestPool = p.customChests || chests;
+    const chest = chestPool.find(c => c.id === data.chestId);
     if (!chest) return;
 
     // Check distance
@@ -1647,13 +2336,21 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Resolve progression for this player (per-archipelago or classic)
+    const chestPlayerEmail = p.email;
+    const chestUserData = chestPlayerEmail ? getUserData(chestPlayerEmail) : null;
+    let chestProg = {};
+    if (p.archipelagoId && p.archipelagoId !== 'classic' && chestUserData) {
+      const chestArch = (chestUserData.archipelagos || []).find(a => a.id === p.archipelagoId);
+      chestProg = chestArch && chestArch.progression ? chestArch.progression : {};
+    } else if (chestUserData && chestUserData.progression) {
+      chestProg = chestUserData.progression;
+    }
+
     // Zone locking for chests
     const chestZone = chest.zone || 1;
     if (chestZone > 1) {
-      const playerEmail = p.email;
-      const userData = playerEmail ? getUserData(playerEmail) : null;
-      const prog = userData && userData.progression ? userData.progression : {};
-      const playerLevel = prog[chest.category] || 1;
+      const playerLevel = chestProg[chest.category] || 1;
       if (playerLevel < chestZone) {
         socket.emit('zoneLocked', { zone: chestZone, category: chest.category, required: chestZone });
         return;
@@ -1661,11 +2358,8 @@ io.on('connection', (socket) => {
     }
 
     // Use player's progression level for question
-    const chestPlayerEmail = p.email;
-    const chestUserData = chestPlayerEmail ? getUserData(chestPlayerEmail) : null;
-    const chestProg = chestUserData && chestUserData.progression ? chestUserData.progression : {};
     const chestQLevel = chestProg[chest.category] || 1;
-    const question = getRandomQuestion(chest.category, chestQLevel);
+    const question = getRandomQuestion(chest.category, chestQLevel, p);
     if (!question) return;
 
     // Mark chest as opened for cooldown tracking
@@ -1679,7 +2373,8 @@ io.on('connection', (socket) => {
       level: question.level,
       correctAnswer: question.answer,
       timestamp: now,
-      isChest: true
+      isChest: true,
+      questionData: question
     };
 
     socket.emit('quizStart', {
@@ -1699,15 +2394,25 @@ io.on('connection', (socket) => {
     const p = players[socket.id];
     if (!p || p.health <= 0) return;
 
-    const sign = infoSigns.find(s => s.id === data.signId);
+    const signPool = p.customSigns || infoSigns;
+    const sign = signPool.find(s => s.id === data.signId);
     if (!sign) return;
 
     // Check distance
     const dist = Math.hypot(p.x - sign.x, p.y - sign.y);
     if (dist > 80) return;
 
-    const tips = studyTips[sign.category] || [];
-    const tip = tips[sign.tipIndex % tips.length] || 'Dica: Continue estudando!';
+    let tip = '';
+    if (p.customArch) {
+      const customIsland = p.customArch.islands.find(i => i.category === sign.category);
+      if (customIsland && customIsland.studyTips && customIsland.studyTips[sign.tipIndex]) {
+        tip = customIsland.studyTips[sign.tipIndex];
+      }
+    }
+    if (!tip) {
+      const tips = studyTips[sign.category] || [];
+      tip = tips[sign.tipIndex % tips.length] || 'Dica: Continue estudando!';
+    }
 
     socket.emit('signTip', {
       signId: sign.id,
@@ -1722,7 +2427,8 @@ io.on('connection', (socket) => {
     if (!p || p.health <= 0) return;
     if (activeQuizzes[socket.id]) return;
 
-    const portal = portals.find(pt => pt.id === data.portalId);
+    const portalPool = p.customPortals || portals;
+    const portal = portalPool.find(pt => pt.id === data.portalId);
     if (!portal) return;
 
     // Check distance
@@ -1801,11 +2507,17 @@ io.on('connection', (socket) => {
     // Pick a random category based on current island
     const isl = getIslandAt(challenger.x, challenger.y);
     const category = (isl && isl.category) ? isl.category : Object.keys(questions)[Math.floor(Math.random() * Object.keys(questions).length)];
-    // Use challenger's progression level for the duel question
+    // Use challenger's progression level for the duel question (per-archipelago aware)
     const challengerData = challenger.email ? getUserData(challenger.email) : null;
-    const challengerProg = challengerData && challengerData.progression ? challengerData.progression : {};
+    let challengerProg = {};
+    if (challenger.archipelagoId && challenger.archipelagoId !== 'classic' && challengerData) {
+      const cArch = (challengerData.archipelagos || []).find(a => a.id === challenger.archipelagoId);
+      challengerProg = cArch && cArch.progression ? cArch.progression : {};
+    } else if (challengerData && challengerData.progression) {
+      challengerProg = challengerData.progression;
+    }
     const duelQLevel = challengerProg[category] || 1;
-    const question = getRandomQuestion(category, duelQLevel);
+    const question = getRandomQuestion(category, duelQLevel, challenger);
     if (!question) return;
 
     activeDuels[pending.duelId] = {
@@ -1858,7 +2570,13 @@ io.on('connection', (socket) => {
   socket.on('respawn', () => {
     const p = players[socket.id];
     if (!p) return;
-    const spawn = randomSpawnOnIsland();
+    let spawn;
+    if (p.customIslands) {
+      const centralIsl = p.customIslands.find(i => i.id === 'central');
+      spawn = centralIsl ? { x: centralIsl.x, y: centralIsl.y } : { x: 3000, y: 3000 };
+    } else {
+      spawn = randomSpawnOnIsland();
+    }
     p.x = spawn.x;
     p.y = spawn.y;
     p.health = 100;
@@ -1873,13 +2591,25 @@ io.on('connection', (socket) => {
   socket.on('saveNotes', (data) => {
     const p = players[socket.id];
     if (!p || !p.email) return;
-    const rec = persistedUsers[p.email];
-    if (!rec) return;
     const { category, content } = data;
     if (!category) return;
-    if (!rec.notes) rec.notes = {};
-    rec.notes[category] = content || '';
-    saveData();
+    const archId = p.archipelagoId;
+    if (archId && archId !== 'classic') {
+      const userData = getUserData(p.email);
+      const arch = userData ? (userData.archipelagos || []).find(a => a.id === archId) : null;
+      if (arch) {
+        if (!arch.notes) arch.notes = {};
+        arch.notes[category] = (content || '').substring(0, 2000);
+        updateUserData(p.email, { archipelagos: userData.archipelagos });
+      }
+    } else {
+      const userData = getUserData(p.email);
+      if (userData) {
+        if (!userData.notes) userData.notes = {};
+        userData.notes[category] = (content || '').substring(0, 2000);
+        updateUserData(p.email, { notes: userData.notes });
+      }
+    }
     socket.emit('notesSaved', { ok: true, category });
     checkAchievements(p.email, socket.id);
   });
@@ -1890,10 +2620,18 @@ io.on('connection', (socket) => {
       socket.emit('achievementsData', { all: ACHIEVEMENTS, unlocked: [] });
       return;
     }
-    const rec = persistedUsers[p.email];
+    const rec = getUserData(p.email);
+    const archId = p.archipelagoId;
+    let unlocked = [];
+    if (archId && archId !== 'classic' && rec) {
+      const arch = (rec.archipelagos || []).find(a => a.id === archId);
+      unlocked = arch && arch.achievements ? arch.achievements : [];
+    } else {
+      unlocked = rec && rec.achievements ? rec.achievements : [];
+    }
     socket.emit('achievementsData', {
       all: ACHIEVEMENTS,
-      unlocked: (rec && rec.achievements) ? rec.achievements : []
+      unlocked
     });
   });
 
@@ -1903,8 +2641,16 @@ io.on('connection', (socket) => {
       socket.emit('notesData', { notes: {} });
       return;
     }
-    const rec = persistedUsers[p.email];
-    socket.emit('notesData', { notes: rec ? (rec.notes || {}) : {} });
+    const rec = getUserData(p.email);
+    const archId = p.archipelagoId;
+    let notes = {};
+    if (archId && archId !== 'classic' && rec) {
+      const arch = (rec.archipelagos || []).find(a => a.id === archId);
+      notes = arch && arch.notes ? arch.notes : {};
+    } else {
+      notes = rec ? (rec.notes || {}) : {};
+    }
+    socket.emit('notesData', { notes });
   });
 
   socket.on('getProgress', () => {
@@ -1913,16 +2659,26 @@ io.on('connection', (socket) => {
       socket.emit('progressData', { profile: {}, quizHistory: [], stats: {} });
       return;
     }
-    const rec = persistedUsers[p.email];
+    const rec = getUserData(p.email);
     if (!rec) {
       socket.emit('progressData', { profile: {}, quizHistory: [], stats: {} });
       return;
     }
-    socket.emit('progressData', {
-      profile: rec.profile || { xp: 0, level: 1, coins: 0 },
-      quizHistory: rec.quizHistory || [],
-      stats: rec.stats || {}
-    });
+    const archId = p.archipelagoId;
+    if (archId && archId !== 'classic') {
+      const arch = (rec.archipelagos || []).find(a => a.id === archId);
+      socket.emit('progressData', {
+        profile: arch && arch.profile ? arch.profile : { xp: 0, level: 1, coins: 0 },
+        quizHistory: arch && arch.quizHistory ? arch.quizHistory : [],
+        stats: arch && arch.stats ? arch.stats : {}
+      });
+    } else {
+      socket.emit('progressData', {
+        profile: rec.profile || { xp: 0, level: 1, coins: 0 },
+        quizHistory: rec.quizHistory || [],
+        stats: rec.stats || {}
+      });
+    }
   });
 
   socket.on('disconnect', () => {

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Knowlands - Escolha seu Arquipelago</title>
+  <link rel="stylesheet" href="archipelago.css" />
+</head>
+<body>
+  <div class="page-bg"></div>
+
+  <div class="container">
+    <h1 class="page-title">Escolha seu Arquipelago</h1>
+    <p class="page-subtitle">Como voce quer estudar hoje?</p>
+
+    <!-- Mode Selection -->
+    <div id="modeSelection" class="mode-grid">
+      <div class="mode-card" id="classicCard">
+        <div class="mode-icon">🏝️</div>
+        <h2 class="mode-name">Ilhas Classicas</h2>
+        <p class="mode-desc">5 ilhas tematicas: Matematica, Historia, Ciencias, Linguas e Programacao. Perguntas prontas com 3 niveis de dificuldade.</p>
+        <div class="mode-badge">Pronto para jogar</div>
+        <button class="mode-btn mode-btn-classic">Entrar</button>
+      </div>
+
+      <div class="mode-card" id="customCard">
+        <div class="mode-icon">📚</div>
+        <h2 class="mode-name">Criar Meu Arquipelago</h2>
+        <p class="mode-desc">Envie seus PDFs e documentos de estudo. A IA gera ilhas, perguntas e conteudo personalizado automaticamente.</p>
+        <div class="mode-badge mode-badge-ai">Powered by IA</div>
+        <button class="mode-btn mode-btn-custom">Criar</button>
+      </div>
+    </div>
+
+    <!-- Previous Archipelagos -->
+    <div id="previousArchs" class="previous-section" style="display:none;">
+      <h3 class="section-title">Meus Arquipelagos</h3>
+      <div id="archList" class="arch-list"></div>
+    </div>
+
+    <!-- Upload Interface (hidden initially) -->
+    <div id="uploadSection" class="upload-section" style="display:none;">
+      <button id="backToModes" class="back-btn">&larr; Voltar</button>
+      <h2 class="upload-title">Criar Arquipelago Personalizado</h2>
+      <p class="upload-subtitle">Envie ate 5 PDFs &mdash; cada um se torna uma ilha</p>
+
+      <div id="dropZone" class="drop-zone">
+        <div class="drop-icon">📄</div>
+        <p class="drop-text">Arraste PDFs aqui ou clique para selecionar</p>
+        <p class="drop-hint">Max 5 arquivos, 100MB cada</p>
+        <input type="file" id="fileInput" accept=".pdf" multiple hidden />
+      </div>
+
+      <div id="fileList" class="file-list"></div>
+
+      <button id="generateBtn" class="generate-btn" style="display:none;">
+        <span class="generate-icon">✨</span> Gerar Ilhas com IA
+      </button>
+
+      <!-- Loading State -->
+      <div id="loadingState" class="loading-state" style="display:none;">
+        <div class="loading-spinner"></div>
+        <p id="loadingText" class="loading-text">Processando...</p>
+        <div class="loading-progress">
+          <div id="loadingBar" class="loading-bar"></div>
+        </div>
+      </div>
+
+      <!-- Preview -->
+      <div id="previewSection" class="preview-section" style="display:none;">
+        <h3 class="preview-title">Seu Arquipelago esta pronto!</h3>
+        <div id="previewGrid" class="preview-grid"></div>
+        <button id="playCustomBtn" class="play-btn">Entrar no Jogo</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="archipelago.js"></script>
+</body>
+</html>

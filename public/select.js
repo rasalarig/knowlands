@@ -11,10 +11,10 @@
     return;
   }
 
-  // If character already chosen, go straight to game
+  // If character already chosen, go straight to archipelago selection
   var existingChar = sessionStorage.getItem('characterId');
   if (existingChar) {
-    window.location.href = '/game.html';
+    window.location.href = '/archipelago.html';
     return;
   }
 
@@ -572,7 +572,7 @@
   playBtn.addEventListener('click', function () {
     if (!selectedChar) return;
     sessionStorage.setItem('characterId', selectedChar);
-    window.location.href = '/game.html';
+    window.location.href = '/archipelago.html';
   });
 
   // ================================================================
