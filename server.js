@@ -730,6 +730,51 @@ const ACHIEVEMENTS = [
   { id: 'noter', name: 'Anotador', desc: 'Escreveu notas em todas as materias', icon: '✏️', category: 'geral' },
 ];
 
+function buildCustomAchievements(arch) {
+  const list = [
+    { id: 'first_correct', name: 'Primeiro Acerto', desc: 'Acertou sua primeira pergunta', icon: '⭐', category: 'geral' },
+    { id: 'first_duel_win', name: 'Duelista', desc: 'Venceu seu primeiro duelo', icon: '⚔️', category: 'geral' },
+    { id: 'correct_10', name: 'Estudante Dedicado', desc: 'Acertou 10 perguntas no total', icon: '📚', category: 'geral' },
+    { id: 'correct_50', name: 'Sabio', desc: 'Acertou 50 perguntas no total', icon: '🎓', category: 'geral' },
+    { id: 'level_5', name: 'Aventureiro', desc: 'Alcancou nivel 5', icon: '🗺️', category: 'geral' },
+    { id: 'level_10', name: 'Veterano', desc: 'Alcancou nivel 10', icon: '👑', category: 'geral' },
+    { id: 'duels_5', name: 'Campeao', desc: 'Venceu 5 duelos', icon: '🏅', category: 'geral' },
+  ];
+  if (arch && arch.islands) {
+    arch.islands.forEach((isl, idx) => {
+      list.push({
+        id: 'island_' + idx + '_5',
+        name: 'Estudante de ' + isl.name,
+        desc: 'Acertou 5 perguntas em ' + isl.name,
+        icon: '📖',
+        category: isl.category
+      });
+      list.push({
+        id: 'island_' + idx + '_master',
+        name: 'Mestre de ' + isl.name,
+        desc: 'Completou todos os niveis em ' + isl.name,
+        icon: '🏆',
+        category: isl.category
+      });
+    });
+    list.push({
+      id: 'all_mastered',
+      name: 'Mestre Total',
+      desc: 'Completou todos os niveis em todas as ilhas!',
+      icon: '👑',
+      category: 'geral'
+    });
+    list.push({
+      id: 'noter',
+      name: 'Anotador',
+      desc: 'Escreveu notas em todas as materias',
+      icon: '✏️',
+      category: 'geral'
+    });
+  }
+  return list;
+}
+
 function checkAchievements(email, socketId) {
   const p = players[socketId];
   const userData = getUserData(email);
@@ -1962,6 +2007,18 @@ io.on('connection', (socket) => {
       players[socket.id].customIslands = customResult.islands;
     }
 
+    // Determine achievements list for this session (dynamic for custom, classic for default)
+    let initAchievements;
+    if (archId !== 'classic' && customResult) {
+      const archForAch = (function() {
+        const archUserData = getUserData(playerEmail);
+        return archUserData ? (archUserData.archipelagos || []).find(a => a.id === archId) : null;
+      })();
+      initAchievements = buildCustomAchievements(archForAch);
+    } else {
+      initAchievements = ACHIEVEMENTS;
+    }
+
     socket.emit('init', {
       id: socket.id,
       player: players[socket.id],
@@ -1973,7 +2030,7 @@ io.on('connection', (socket) => {
       portals: gamePortals,
       mapW: MAP_W,
       mapH: MAP_H,
-      allAchievements: ACHIEVEMENTS,
+      allAchievements: initAchievements,
       unlockedAchievements: playerAchievements,
       progression: playerProgression
     });
@@ -2623,14 +2680,17 @@ io.on('connection', (socket) => {
     const rec = getUserData(p.email);
     const archId = p.archipelagoId;
     let unlocked = [];
+    let achievementsList;
     if (archId && archId !== 'classic' && rec) {
       const arch = (rec.archipelagos || []).find(a => a.id === archId);
       unlocked = arch && arch.achievements ? arch.achievements : [];
+      achievementsList = buildCustomAchievements(arch);
     } else {
       unlocked = rec && rec.achievements ? rec.achievements : [];
+      achievementsList = ACHIEVEMENTS;
     }
     socket.emit('achievementsData', {
-      all: ACHIEVEMENTS,
+      all: achievementsList,
       unlocked
     });
   });

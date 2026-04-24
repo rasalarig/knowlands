@@ -603,25 +603,40 @@
     updateAchievementsBadge();
     updateHUD();
 
+    // Update CATEGORIES, CAT_NAMES, CAT_COLORS from current islands
+    if (data.islands) {
+      var subjectIslands = data.islands.filter(function(i) { return i.category !== null; });
+      if (subjectIslands.length > 0) {
+        var themeColorMap = { blue: '#00e5ff', brown: '#ffab40', green: '#69f0ae', purple: '#ea80fc', neon: '#76ff03', gold: '#ffd700' };
+        CATEGORIES = subjectIslands.map(function(i) { return i.category; });
+        CAT_NAMES = {};
+        CAT_COLORS = {};
+        subjectIslands.forEach(function(i) {
+          var shortName = i.name.replace('Ilha da ', '').replace('Ilha das ', '').replace('Ilha do ', '');
+          CAT_NAMES[i.category] = shortName;
+          CAT_COLORS[i.category] = themeColorMap[i.theme] || '#ffd700';
+        });
+      }
+    }
+
     // Rebuild notes tabs to match current archipelago's islands
     var notesTabs = document.querySelector('.notes-tabs');
     if (notesTabs && data.islands) {
       var subjects = data.islands.filter(function(i) { return i.category !== null; });
       if (subjects.length > 0) {
         notesTabs.innerHTML = '';
-        var catColors = { blue: '#00e5ff', brown: '#ffab40', green: '#69f0ae', purple: '#ea80fc', neon: '#76ff03', gold: '#ffd700' };
         subjects.forEach(function(isl, idx) {
           var btn = document.createElement('button');
           btn.className = 'notes-tab' + (idx === 0 ? ' active' : '');
           btn.setAttribute('data-cat', isl.category);
-          var color = catColors[isl.theme] || '#ffd700';
-          var shortName = isl.name.replace('Ilha da ', '').replace('Ilha das ', '').replace('Ilha do ', '');
+          var color = CAT_COLORS[isl.category] || '#ffd700';
+          var shortName = CAT_NAMES[isl.category] || isl.name;
           btn.innerHTML = '<span class="tab-dot" style="background:' + color + '"></span> ' + shortName;
           notesTabs.appendChild(btn);
         });
         // Set current category to first subject
         currentNoteCategory = subjects[0].category;
-        // Re-init tab click handlers
+        // Re-init tab click handlers (safe — only rebinds tabs via onclick)
         initNotesPanel();
       }
     }
@@ -1062,7 +1077,7 @@
   // ================================================================
   let progressPanelOpen = false;
 
-  const CAT_COLORS = {
+  let CAT_COLORS = {
     matematica: '#00e5ff',
     historia:   '#ffab40',
     ciencias:   '#69f0ae',
@@ -1070,7 +1085,7 @@
     programacao:'#76ff03'
   };
 
-  const CAT_NAMES = {
+  let CAT_NAMES = {
     matematica: 'Matematica',
     historia:   'Historia',
     ciencias:   'Ciencias',
@@ -1078,7 +1093,7 @@
     programacao:'Programacao'
   };
 
-  const CATEGORIES = ['matematica', 'historia', 'ciencias', 'linguas', 'programacao'];
+  let CATEGORIES = ['matematica', 'historia', 'ciencias', 'linguas', 'programacao'];
 
   function relativeTime(ts) {
     const now = Date.now();
@@ -1356,29 +1371,96 @@
     }
   }
 
+  let _notesPanelInitDone = false;
+
   function initNotesPanel() {
     const panel = document.getElementById('notesPanel');
     if (!panel) return;
 
-    // Close button
+    // Close button — use onclick assignment to avoid stacking duplicate listeners
     const closeBtn = document.getElementById('notesCloseBtn');
     if (closeBtn) {
-      closeBtn.addEventListener('click', function() {
+      closeBtn.onclick = function() {
         window.toggleNotes && window.toggleNotes();
-      });
+      };
     }
 
-    // Click backdrop to close
-    panel.addEventListener('click', function(e) {
-      if (e.target === panel) {
-        window.toggleNotes && window.toggleNotes();
-      }
-    });
+    // Click backdrop to close — only bind once
+    if (!_notesPanelInitDone) {
+      panel.addEventListener('click', function(e) {
+        if (e.target === panel) {
+          window.toggleNotes && window.toggleNotes();
+        }
+      });
 
-    // Tab switching
+      // Textarea input: auto-save with debounce + char count (only bind once)
+      const textarea = document.getElementById('notesTextarea');
+      const charCount = document.getElementById('notesCharCount');
+      if (textarea) {
+        textarea.addEventListener('input', function() {
+          if (charCount) charCount.textContent = textarea.value.length + '/2000';
+          setNotesSaveStatus('saving');
+          if (notesSaveTimeout) clearTimeout(notesSaveTimeout);
+          notesSaveTimeout = setTimeout(function() {
+            saveCurrentNote();
+            setNotesSaveStatus('saved');
+            setTimeout(function() { setNotesSaveStatus('idle'); }, 2000);
+          }, 1500);
+        });
+      }
+
+      // Format buttons (only bind once)
+      const formatBtns = panel.querySelectorAll('.notes-format-btn');
+      formatBtns.forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          const format = btn.getAttribute('data-format');
+          const ta = document.getElementById('notesTextarea');
+          if (!ta) return;
+          const start = ta.selectionStart;
+          const end = ta.selectionEnd;
+          const selected = ta.value.substring(start, end);
+          let insert;
+          if (format === 'bold') {
+            insert = '**' + (selected || 'negrito') + '**';
+            ta.value = ta.value.substring(0, start) + insert + ta.value.substring(end);
+            ta.selectionStart = start + 2;
+            ta.selectionEnd = start + 2 + (selected || 'negrito').length;
+          } else if (format === 'italic') {
+            insert = '*' + (selected || 'italico') + '*';
+            ta.value = ta.value.substring(0, start) + insert + ta.value.substring(end);
+            ta.selectionStart = start + 1;
+            ta.selectionEnd = start + 1 + (selected || 'italico').length;
+          } else if (format === 'list') {
+            // Insert bullet at beginning of current line
+            const lineStart = ta.value.lastIndexOf('\n', start - 1) + 1;
+            ta.value = ta.value.substring(0, lineStart) + '• ' + ta.value.substring(lineStart);
+            ta.selectionStart = start + 2;
+            ta.selectionEnd = end + 2;
+          }
+          const charCount2 = document.getElementById('notesCharCount');
+          if (charCount2) charCount2.textContent = ta.value.length + '/2000';
+          ta.focus();
+        });
+      });
+
+      // Save button (only bind once)
+      const saveBtn = document.getElementById('notesSaveBtn');
+      if (saveBtn) {
+        saveBtn.addEventListener('click', function() {
+          setNotesSaveStatus('saving');
+          saveCurrentNote();
+          setNotesSaveStatus('saved');
+          setTimeout(function() { setNotesSaveStatus('idle'); }, 2000);
+        });
+      }
+
+      _notesPanelInitDone = true;
+    }
+
+    // Tab switching — always re-bind after tabs are rebuilt dynamically
     const tabs = panel.querySelectorAll('.notes-tab');
     tabs.forEach(function(tab) {
-      tab.addEventListener('click', function() {
+      tab.onclick = function() {
         // Save current note before switching
         saveCurrentNote();
         // Update active tab
@@ -1388,68 +1470,8 @@
         currentNoteCategory = tab.getAttribute('data-cat');
         loadNoteToEditor(currentNoteCategory);
         setNotesSaveStatus('idle');
-      });
+      };
     });
-
-    // Textarea input: auto-save with debounce + char count
-    const textarea = document.getElementById('notesTextarea');
-    const charCount = document.getElementById('notesCharCount');
-    if (textarea) {
-      textarea.addEventListener('input', function() {
-        if (charCount) charCount.textContent = textarea.value.length + '/2000';
-        setNotesSaveStatus('saving');
-        if (notesSaveTimeout) clearTimeout(notesSaveTimeout);
-        notesSaveTimeout = setTimeout(function() {
-          saveCurrentNote();
-          setNotesSaveStatus('saved');
-          setTimeout(function() { setNotesSaveStatus('idle'); }, 2000);
-        }, 1500);
-      });
-    }
-
-    // Format buttons
-    const formatBtns = panel.querySelectorAll('.notes-format-btn');
-    formatBtns.forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        const format = btn.getAttribute('data-format');
-        const ta = document.getElementById('notesTextarea');
-        if (!ta) return;
-        const start = ta.selectionStart;
-        const end = ta.selectionEnd;
-        const selected = ta.value.substring(start, end);
-        let before, after, insert;
-        if (format === 'bold') {
-          insert = '**' + (selected || 'negrito') + '**';
-          ta.value = ta.value.substring(0, start) + insert + ta.value.substring(end);
-          ta.selectionStart = start + 2;
-          ta.selectionEnd = start + 2 + (selected || 'negrito').length;
-        } else if (format === 'italic') {
-          insert = '*' + (selected || 'italico') + '*';
-          ta.value = ta.value.substring(0, start) + insert + ta.value.substring(end);
-          ta.selectionStart = start + 1;
-          ta.selectionEnd = start + 1 + (selected || 'italico').length;
-        } else if (format === 'list') {
-          // Insert bullet at beginning of current line
-          const lineStart = ta.value.lastIndexOf('\n', start - 1) + 1;
-          ta.value = ta.value.substring(0, lineStart) + '• ' + ta.value.substring(lineStart);
-          ta.selectionStart = start + 2;
-          ta.selectionEnd = end + 2;
-        }
-        if (charCount) charCount.textContent = ta.value.length + '/2000';
-        ta.focus();
-      });
-    });
-
-    // Save button
-    const saveBtn = document.getElementById('notesSaveBtn');
-    if (saveBtn) {
-      saveBtn.addEventListener('click', function() {
-        setNotesSaveStatus('saving');
-        saveCurrentNote();
-        setNotesSaveStatus('saved');
-        setTimeout(function() { setNotesSaveStatus('idle'); }, 2000);
-      });
-    }
   }
 
   // Initialize notes panel once DOM is ready (called after socket setup)
